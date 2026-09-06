@@ -11,7 +11,8 @@
  * and `dsh --profile web -h` prints the web app's help, not this one's.
  *
  * `web` is a hardcoded alias for `--profile web`; `plugin` manages a profile's
- * plugin dependencies by forwarding to pnpm.
+ * plugin dependencies by forwarding to pnpm; `browser` installs the Chrome
+ * native-messaging host.
  * @module @deepseek-ai/dsh/args
  */
 
@@ -44,8 +45,17 @@ interface PluginInvocation {
   args: string[]
 }
 
+/** Install, remove, or probe the Chrome native-messaging host. */
+interface BrowserInvocation {
+  mode: 'browser'
+  action: 'install' | 'uninstall' | 'status'
+  browser: 'chrome' | 'chromium' | 'edge' | 'brave'
+  /** Chrome extension id pinned in the native-host `allowed_origins`. */
+  extensionId?: string
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | BrowserInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -69,6 +79,7 @@ Examples:
   dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
   dsh --profile web --help                   the web app's own flags and help
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
+  dsh browser install --browser chrome --extension-id <id>  pin Native Messaging to a Load-unpacked id
 `
 
 /**
@@ -178,6 +189,32 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       if (options.profile === '') program.error('error: --profile needs a name')
       if (args.length === 0) program.error('error: plugin needs pnpm arguments to forward (e.g. add <package>)')
       resolved = { mode: 'plugin', profile: options.profile, args }
+    })
+
+  const browser = program.command('browser').description('install, uninstall, or probe the Chrome native-messaging host used by browser_* tools')
+  browser
+    .argument('<action>', 'install | uninstall | status')
+    .option('--browser <name>', 'chrome, chromium, edge, or brave', 'chrome')
+    .option('--extension-id <id>', '32-character unpacked Chrome extension id (a-p) for Native Messaging allowed_origins')
+    .action((action: string, options: { browser: string; extensionId?: string }) => {
+      rejectParentOptions('browser')
+      if (action !== 'install' && action !== 'uninstall' && action !== 'status') {
+        program.error('error: browser action must be install, uninstall, or status')
+      }
+      const name = options.browser
+      if (name !== 'chrome' && name !== 'chromium' && name !== 'edge' && name !== 'brave') {
+        program.error('error: --browser must be chrome, chromium, edge, or brave')
+      }
+      const extensionId = options.extensionId
+      if (extensionId !== undefined && !/^[a-p]{32}$/.test(extensionId)) {
+        program.error('error: --extension-id must be the 32-character id from chrome://extensions (letters a-p)')
+      }
+      resolved = {
+        mode: 'browser',
+        action,
+        browser: name,
+        ...extensionId === undefined ? {} : { extensionId },
+      }
     })
 
   try {

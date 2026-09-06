@@ -27,6 +27,9 @@
       "path": "../../packages/bundle/base"
     },
     {
+      "path": "../../packages/browser/browser-chrome-extension"
+    },
+    {
       "path": "../../packages/bundle/headless"
     },
     {

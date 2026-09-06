@@ -597,6 +597,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names.',
   },
   {
+    key: 'browser',
+    pkg: 'browser',
+    title: 'Browser provider registry',
+    mode: 'seam',
+    implementations: ['browser-chrome-extension'],
+    consumers: ['tool-browser'],
+    note: 'The Chrome Native Messaging provider registers into one ctx.browser seam; tool-browser owns the stable model-facing browser_* names.',
+  },
+  {
     key: 'spillStore',
     pkg: 'spill',
     title: 'Spill storage seam',

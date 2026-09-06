@@ -313,6 +313,49 @@ export type Config = LocalConfig
 
 来源：[`packages/shell/bash-sandbox/src/index.ts:35`](../packages/shell/bash-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-browser"></a>
+
+## `@deepseek-ai/dsh-browser`
+
+```ts config-catalog
+/**
+ * Config for the browser seam. `provider` pins which backend wins; it is
+ * optional (a single registered usable provider auto-selects). Operational
+ * overrides such as environment variables must feed this same field rather
+ * than introduce a hidden priority chain.
+ */
+export interface BrowserRuntimeConfig {
+  /** Explicit provider id. Omitted = auto-select when exactly one usable. */
+  readonly provider?: string
+}
+```
+
+来源： [`packages/browser/browser/src/index.ts:72`](../packages/browser/browser/src/index.ts)
+
+<a id="deepseek-aidsh-browser-chrome-extension"></a>
+
+## `@deepseek-ai/dsh-browser-chrome-extension`
+
+依赖： `browser`
+
+```ts config-catalog
+/** Plugin config: socket path, timeouts, tab-group title, and extension id. */
+export interface Config {
+  /** Absolute socket or named-pipe path. Defaults to `$DSH_HOME/browser/host.sock`. */
+  socketPath?: string
+  /** Connect timeout in milliseconds. */
+  connectTimeoutMs?: number
+  /** Per-RPC timeout in milliseconds. */
+  requestTimeoutMs?: number
+  /** Title of the Chrome tab group used for agent-opened tabs. */
+  tabGroupTitle?: string
+  /** Chrome extension id pinned in install manifests. */
+  extensionId?: string
+}
+```
+
+来源： [`packages/browser/browser-chrome-extension/src/index.ts:68`](../packages/browser/browser-chrome-extension/src/index.ts)
+
 <a id="deepseek-aidsh-client-connection"></a>
 
 ## `@deepseek-ai/dsh-client-connection`
@@ -2639,6 +2682,37 @@ export interface Config {
 ```
 
 来源：[`packages/shell/tool-bash-persistent/src/index.ts:432`](../packages/shell/tool-bash-persistent/src/index.ts)
+
+<a id="deepseek-aidsh-tool-browser"></a>
+
+## `@deepseek-ai/dsh-tool-browser`
+
+依赖： `tools` · `browser` · `systemPrompt`
+
+```ts config-catalog
+/** Plugin config: enablement, approval mode, snapshot/screenshot caps, and the raw-CDP hatch. */
+export interface Config {
+  /** Register the `browser_*` tools. Defaults to true. */
+  enabled?: boolean
+  /** When to ask before a browser side effect. */
+  approval?: BrowserApprovalMode
+  /** Upper bound on accessibility nodes in one snapshot. */
+  snapshotMaxNodes?: number
+  /** Upper bound on an inlined screenshot's decoded byte size. */
+  screenshotMaxBytes?: number
+  /** Cooperative timeout budget (ms) for `browser_evaluate`. */
+  evaluateTimeoutMs?: number
+  /** Register the raw `browser_cdp` escape hatch. Defaults to false. */
+  allowRawCdp?: boolean
+  /** Cooperative timeout budget (ms) for the other browser tools. */
+  timeoutMs?: number
+}
+
+/** When the consumer asks before a browser side effect. */
+export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts:47`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

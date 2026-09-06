@@ -166,6 +166,13 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // resolve at install time, before the build produces lib/bin.js.
   '@deepseek-ai/dsh-experimental-webworker-packer': ['bin.js', 'lib/repository-*.js'],
   '@deepseek-ai/dsh-subprocess-local': ['scripts/ensure-spawn-helper.mjs'],
+  '@deepseek-ai/dsh-browser-chrome-extension': [
+    'lib/host.js',
+    'lib/install.js',
+    'bin/dsh-browser-host',
+    'bin/dsh-browser-host.cmd',
+    'extension',
+  ],
 }
 
 function sameStringList(actual: readonly string[] | undefined, expected: readonly string[]): boolean {

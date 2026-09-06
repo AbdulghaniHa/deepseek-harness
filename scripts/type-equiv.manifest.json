@@ -1427,6 +1427,26 @@
       "source": "packages/web/web/src/types.ts"
     },
     {
+      "doc": "docs/subsystems/browser.md",
+      "symbol": "BrowserProvider",
+      "source": "packages/browser/browser/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/browser.md",
+      "symbol": "BrowserTab",
+      "source": "packages/browser/browser/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/browser.md",
+      "symbol": "BrowserOpenTabRequest",
+      "source": "packages/browser/browser/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/browser.md",
+      "symbol": "BrowserCdpRequest",
+      "source": "packages/browser/browser/src/types.ts"
+    },
+    {
       "doc": "docs/subsystems/spill.md",
       "symbol": "SaveTextSpill",
       "source": "packages/spill/spill/src/types.ts"

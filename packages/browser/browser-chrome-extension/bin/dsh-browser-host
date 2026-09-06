@@ -1,0 +1,6 @@
+#!/bin/sh
+# Chrome Native Messaging launches this with a GUI PATH that does not include
+# Homebrew, Hermes, or ~/.local/bin. Prepend those before execing Node.
+export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "${dir}/../lib/host.js"

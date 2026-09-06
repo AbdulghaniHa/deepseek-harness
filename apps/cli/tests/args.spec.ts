@@ -45,6 +45,21 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'profile', profile: 'tui', patches: ['a.yml'], args: ['--resume', 'b', '--patch', 'late.yml'] })
   })
 
+  it('routes the browser native-host manager', () => {
+    expect(parse(['browser', 'install'])).toEqual({ mode: 'browser', action: 'install', browser: 'chrome' })
+    expect(parse(['browser', 'status', '--browser', 'edge']))
+      .toEqual({ mode: 'browser', action: 'status', browser: 'edge' })
+    expect(parse(['browser', 'uninstall', '--browser', 'chromium']))
+      .toEqual({ mode: 'browser', action: 'uninstall', browser: 'chromium' })
+    expect(parse(['browser', 'install', '--extension-id', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']))
+      .toEqual({
+        mode: 'browser',
+        action: 'install',
+        browser: 'chrome',
+        extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      })
+  })
+
   it('routes the plugin pnpm forwarder', () => {
     expect(parse(['plugin', '--profile', 'tui', 'add', 'turtle-ui']))
       .toEqual({ mode: 'plugin', profile: 'tui', args: ['add', 'turtle-ui'] })
@@ -96,6 +111,10 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
+    expect(exitCode(['browser', 'open'])).toBe(1)
+    expect(exitCode(['browser', 'install', '--browser', 'safari'])).toBe(1)
+    expect(exitCode(['browser', 'install', '--extension-id', 'not-an-id'])).toBe(1)
+    expect(exitCode(['--profile', 'x', 'browser', 'install'])).toBe(1)
   })
 
   it('keeps its own help for an invocation with no app to hand it to', () => {

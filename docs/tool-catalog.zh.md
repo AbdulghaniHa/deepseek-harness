@@ -44,6 +44,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2231,3 +2232,590 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 来源：[`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。
+
+<a id="deepseek-aidsh-tool-browser"></a>
+
+## `@deepseek-ai/dsh-tool-browser`
+
+### `browser_attach`
+
+Attach to an existing Chrome tab so later browser_* calls can drive it. Requires approval because this reuses the user's logged-in session.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string",
+      "description": "Tab id from browser_tabs."
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_bookmarks`
+
+List Chrome bookmarks, or create one when title and url are supplied.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    }
+  }
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_cdp`
+
+Send a raw Chrome DevTools Protocol command to an attached tab. Disabled unless allowRawCdp is true.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "params": {}
+  },
+  "required": [
+    "tabId",
+    "method"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_click`
+
+Click a snapshot ref or raw viewport coordinates on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string",
+      "description": "Snapshot ref from browser_snapshot."
+    },
+    "x": {
+      "type": "number",
+      "description": "Viewport x when not using a ref."
+    },
+    "y": {
+      "type": "number",
+      "description": "Viewport y when not using a ref."
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_close`
+
+Close an attached Chrome tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_console`
+
+Read recent console messages from an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_downloads`
+
+List recent Chrome downloads.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_evaluate`
+
+Run a JavaScript expression in the attached tab and return a JSON value. Requires approval.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "expression": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId",
+    "expression"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_handle_dialog`
+
+Accept or dismiss a JavaScript alert, confirm, or prompt.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "accept": {
+      "type": "boolean"
+    },
+    "promptText": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId",
+    "accept"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_history_search`
+
+Search the user's Chrome browsing history.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_hover`
+
+Hover a snapshot ref or viewport coordinates without clicking.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "x": {
+      "type": "number"
+    },
+    "y": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_navigate`
+
+Navigate an attached tab: goto, back, forward, or reload.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "goto",
+        "back",
+        "forward",
+        "reload"
+      ]
+    },
+    "url": {
+      "type": "string",
+      "description": "Required when action is goto."
+    }
+  },
+  "required": [
+    "tabId",
+    "action"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_open`
+
+Open a URL in a new Chrome tab and attach to it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "http(s) URL to open."
+    }
+  },
+  "required": [
+    "url"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_press_key`
+
+Press a single key with optional modifiers on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    },
+    "modifiers": {
+      "type": "integer",
+      "description": "CDP modifier bitmask."
+    }
+  },
+  "required": [
+    "tabId",
+    "key"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_reading_list`
+
+List the Chrome reading list, or add an entry when title and url are supplied.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    }
+  }
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_screenshot`
+
+Capture a PNG screenshot of an attached tab. Oversized images are summarized instead of inlined.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "fullPage": {
+      "type": "boolean",
+      "description": "Capture the full page instead of the viewport."
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_scroll`
+
+Scroll the page or a snapshot ref on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "deltaX": {
+      "type": "number"
+    },
+    "deltaY": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_select_option`
+
+Choose a select option by visible text on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "value": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId",
+    "ref",
+    "value"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_snapshot`
+
+Capture a ref-annotated accessibility outline of the attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_tabs`
+
+List open Chrome tabs across all windows.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_text`
+
+Read visible text from an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_type`
+
+Type text into the focused field on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref to focus first."
+    },
+    "clear": {
+      "type": "boolean",
+      "description": "Select-all before typing."
+    },
+    "submit": {
+      "type": "boolean",
+      "description": "Press Enter after typing."
+    }
+  },
+  "required": [
+    "tabId",
+    "text"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_upload`
+
+Set files on a file input identified by a snapshot ref.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "tabId",
+    "ref",
+    "paths"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_wait_for`
+
+Wait until text appears or a JS expression is truthy on an attached tab.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "expression": {
+      "type": "string"
+    },
+    "timeoutMs": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。

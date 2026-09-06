@@ -594,6 +594,107 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'browser',
+    summary: 'The browser access service.',
+    description: 'The browser access service. Registered as `ctx.browser` (one instance per context).\n\nSelection semantics (resolved at execution time, never order-dependent):\n\n- A configured id that is registered and `available()` → that provider.\n- A configured id not registered → `BROWSER_PROVIDER_CONFIGURED_MISSING`.\n- A configured id registered but unavailable → `BROWSER_PROVIDER_CONFIGURED_UNAVAILABLE`.\n- No id configured, exactly one registered usable provider → that provider.\n- No id configured, multiple usable providers → `BROWSER_PROVIDER_AMBIGUOUS`.\n- No id configured, no usable provider → `BROWSER_PROVIDER_UNAVAILABLE`.',
+    methods: [
+      {
+        signature: 'registerProvider(provider: BrowserProvider): () => void',
+        description: 'Register a browser provider. Throws BrowserError `BROWSER_DUPLICATE_PROVIDER` if its id is already registered. Returns a disposer; disposed with the calling fiber.',
+        parameters: [{ name: 'provider', description: 'the provider; its `id` is the registry key.' }],
+        returns: 'the disposer that unregisters the provider.',
+      },
+      {
+        signature: 'async listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>',
+        description: 'List every open tab through the selected provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the current tab list.',
+      },
+      {
+        signature: 'async openTab(owner: Agent, request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<{ tab: BrowserTab attachmentId: BrowserAttachmentId }>',
+        description: 'Open a tab, attach it for `owner`, and return both identities.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the new attachment.' }, { name: 'request', description: 'destination URL and optional agent-group flag.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the opened tab and the minted attachment id.',
+      },
+      {
+        signature: 'async attach(owner: Agent, tabId: BrowserTabId, signal?: AbortSignal): Promise<BrowserAttachmentId>',
+        description: 'Attach `owner` to an existing tab. A second attach by the same owner returns the existing attachment. The provider attach runs once per tab while any owner holds it.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the attachment.' }, { name: 'tabId', description: 'tab to claim.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the attachment id authorizing later calls.',
+      },
+      {
+        signature: 'async detach(owner: Agent, attachmentId: BrowserAttachmentId, signal?: AbortSignal): Promise<void>',
+        description: 'Drop one owner attachment. The provider detaches the tab only when no other attachment still holds it.',
+        parameters: [{ name: 'owner', description: 'exact Agent that created the attachment.' }, { name: 'attachmentId', description: 'attachment to drop.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider detach.' }],
+      },
+      {
+        signature: 'async closeTab(owner: Agent, tabId: BrowserTabId, signal?: AbortSignal): Promise<void>',
+        description: 'Close a tab the owner has attached. Drops every attachment on that tab.',
+        parameters: [{ name: 'owner', description: 'exact Agent that attached the tab.' }, { name: 'tabId', description: 'tab to close.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async cdp(owner: Agent, request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>',
+        description: 'Send one CDP command on a tab the owner has attached.',
+        parameters: [{ name: 'owner', description: 'exact Agent that attached the tab.' }, { name: 'request', description: 'method plus optional params.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the CDP result value.',
+      },
+      {
+        signature: 'onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void',
+        description: 'Subscribe to CDP events from the selected provider.',
+        parameters: [{ name: 'listener', description: 'called with each forwarded event.' }],
+        returns: 'disposer that removes this listener.',
+      },
+      {
+        signature: 'capabilities(): readonly BrowserCapability[]',
+        description: 'Facets the selected provider currently advertises.',
+        parameters: [],
+        returns: 'the provider\'s capability list, or an empty list when none is usable.',
+      },
+      {
+        signature: 'async historySearch(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>',
+        description: 'Search browsing history through the optional history facet.',
+        parameters: [{ name: 'query', description: 'history search string.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'matching history items.',
+      },
+      {
+        signature: 'async listBookmarks(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>',
+        description: 'List bookmarks through the optional bookmarks facet.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'bookmark items.',
+      },
+      {
+        signature: 'async createBookmark(item: { readonly title: string; readonly url: string }, signal?: AbortSignal): Promise<BrowserBookmarkItem>',
+        description: 'Create one bookmark through the optional bookmarks facet.',
+        parameters: [{ name: 'item', description: 'title and URL.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the created bookmark.',
+      },
+      {
+        signature: 'async listReadingList(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>',
+        description: 'List the reading list through the optional reading-list facet.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'reading-list items.',
+      },
+      {
+        signature: 'async addReadingList(item: { readonly title: string; readonly url: string }, signal?: AbortSignal): Promise<BrowserReadingListItem>',
+        description: 'Add one reading-list entry through the optional reading-list facet.',
+        parameters: [{ name: 'item', description: 'title and URL.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the created entry.',
+      },
+      {
+        signature: 'async listDownloads(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>',
+        description: 'List downloads through the optional downloads facet.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'download items.',
+      },
+      {
+        signature: 'listAttachments(owner: Agent): readonly BrowserAttachment[]',
+        description: 'Attachments currently held by `owner`.',
+        parameters: [{ name: 'owner', description: 'exact Agent whose attachments to list.' }],
+        returns: 'a fresh snapshot of that owner\'s attachments.',
+      },
+    ],
+  },
+  {
     key: 'clientModules',
     summary: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index injection rows.',
     description: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index injection rows. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
@@ -3712,6 +3813,50 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'BrandedNumber',
     declaration: 'export type BrandedNumber<B extends string> = number & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BrowserAttachment',
+    declaration: 'export interface BrowserAttachment {\n    readonly id: BrowserAttachmentId;\n    readonly tabId: BrowserTabId;\n    readonly owner: Agent;\n}',
+  },
+  {
+    name: 'BrowserBookmarkItem',
+    declaration: 'export interface BrowserBookmarkItem {\n    readonly id: string;\n    readonly title: string;\n    readonly url?: string;\n}',
+  },
+  {
+    name: 'BrowserCapability',
+    declaration: 'export type BrowserCapability = \'tabs\' | \'cdp\' | \'history\' | \'bookmarks\' | \'readingList\' | \'downloads\' | \'notifications\';',
+  },
+  {
+    name: 'BrowserCdpEvent',
+    declaration: 'export interface BrowserCdpEvent {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'BrowserCdpRequest',
+    declaration: 'export interface BrowserCdpRequest {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params?: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'BrowserDownloadItem',
+    declaration: 'export interface BrowserDownloadItem {\n    readonly id: number;\n    readonly url: string;\n    readonly filename: string;\n    readonly state: string;\n}',
+  },
+  {
+    name: 'BrowserHistoryItem',
+    declaration: 'export interface BrowserHistoryItem {\n    readonly url: string;\n    readonly title: string;\n    readonly lastVisitTime: number;\n}',
+  },
+  {
+    name: 'BrowserOpenTabRequest',
+    declaration: 'export interface BrowserOpenTabRequest {\n    readonly url: string;\n    readonly group?: boolean;\n}',
+  },
+  {
+    name: 'BrowserProvider',
+    declaration: 'export interface BrowserProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly BrowserCapability[];\n    listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>;\n    openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>;\n    attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    cdp(request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>;\n    onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void;\n    historySearch?(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>;\n    listBookmarks?(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>;\n    createBookmark?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserBookmarkItem>;\n    listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>;\n    addReadingList?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserReadingListItem>;\n    listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>;\n}',
+  },
+  {
+    name: 'BrowserReadingListItem',
+    declaration: 'export interface BrowserReadingListItem {\n    readonly url: string;\n    readonly title: string;\n    readonly hasBeenRead: boolean;\n}',
+  },
+  {
+    name: 'BrowserTab',
+    declaration: 'export interface BrowserTab {\n    readonly id: BrowserTabId;\n    readonly url: string;\n    readonly title: string;\n    readonly active: boolean;\n    readonly windowId: number;\n    readonly grouped: boolean;\n}',
   },
   {
     name: 'ClientArtifactBaseline',

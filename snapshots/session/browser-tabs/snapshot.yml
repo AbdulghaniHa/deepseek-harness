@@ -1,0 +1,8 @@
+version: 1
+scenario: browser-tabs
+profile: headless
+composition: browser
+recording: authored
+header:
+  class: browser
+  pin: true

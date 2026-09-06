@@ -1,0 +1,19 @@
+# Browser-tabs composition: disable the Chrome-extension transport and register
+# a deterministic in-process provider so replay can execute browser_tabs.
+- insert:
+    - id: browser-tabs-fixture
+      name: './browser-tabs-fixture.mjs'
+
+- id: browser
+  name: '@deepseek-ai/dsh-browser'
+
+- id: browser-chrome-extension
+  name: '@deepseek-ai/dsh-browser-chrome-extension'
+  disabled: true
+
+- id: tool-browser
+  name: '@deepseek-ai/dsh-tool-browser'
+  config:
+    enabled: true
+    approval: never
+    allowRawCdp: false

@@ -464,6 +464,22 @@
         fetch: true
         searchTimeoutMs: 60000
 
+    # Chrome Native Messaging browser seam. Tools stay registered when the
+    # native host is disconnected and fail at execution with BROWSER_NOT_CONNECTED.
+    # allowRawCdp stays false: raw CDP is an explicit product opt-in.
+    - id: browser
+      name: '@deepseek-ai/dsh-browser'
+
+    - id: browser-chrome-extension
+      name: '@deepseek-ai/dsh-browser-chrome-extension'
+
+    - id: tool-browser
+      name: '@deepseek-ai/dsh-tool-browser'
+      config:
+        enabled: false
+        approval: user-tabs
+        allowRawCdp: false
+
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 
     # The tool registry. Presentation mode is a deployment choice; omitting it here

@@ -168,6 +168,12 @@ flowchart LR
   cfg --> plugin_dsh_base_web_fetch_http
   plugin_dsh_base_tool_web["tool-web<br/>@deepseek-ai/dsh-tool-web"]
   cfg --> plugin_dsh_base_tool_web
+  plugin_dsh_base_browser["browser<br/>@deepseek-ai/dsh-browser"]
+  cfg --> plugin_dsh_base_browser
+  plugin_dsh_base_browser_chrome_extension["browser-chrome-extension<br/>@deepseek-ai/dsh-browser-chrome-extension"]
+  cfg --> plugin_dsh_base_browser_chrome_extension
+  plugin_dsh_base_tool_browser["tool-browser<br/>@deepseek-ai/dsh-tool-browser"]
+  cfg --> plugin_dsh_base_tool_browser
   plugin_dsh_base_tools["tools<br/>@deepseek-ai/dsh-tools"]
   cfg --> plugin_dsh_base_tools
   plugin_dsh_base_system_prompt["system-prompt<br/>@deepseek-ai/dsh-system-prompt"]
@@ -262,6 +268,9 @@ flowchart LR
 | `web-search-deepseek` | `@deepseek-ai/dsh-web-search-deepseek` |
 | `web-fetch-http` | `@deepseek-ai/dsh-web-fetch-http` |
 | `tool-web` | `@deepseek-ai/dsh-tool-web` |
+| `browser` | `@deepseek-ai/dsh-browser` |
+| `browser-chrome-extension` | `@deepseek-ai/dsh-browser-chrome-extension` |
+| `tool-browser` | `@deepseek-ai/dsh-tool-browser` |
 | `tools` | `@deepseek-ai/dsh-tools` |
 | `system-prompt` | `@deepseek-ai/dsh-system-prompt` |
 | `agent-loop` | `@deepseek-ai/dsh-agent-loop` |
