@@ -74,6 +74,7 @@ export function computerDoctorRemediation(
  */
 export async function doctor(options: ComputerDoctorOptions = {}): Promise<ComputerDoctorReport> {
   const platform = options.platform ?? process.platform
+  /* v8 ignore next -- the real addon import runs in local.e2e.ts; unit tests inject `load`. */
   const simulang = await (options.load ?? loadSimulang)()
   const backend = simulang === undefined
     ? createPlatformBackend({ platform })

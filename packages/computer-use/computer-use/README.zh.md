@@ -62,6 +62,7 @@ kind: "package-reference"
 | `src/index.ts` | 注册表、授权、拒绝、命中测试 |
 | `src/types.ts` | 提供方词汇和 `ComputerError` |
 | `src/deny.ts` | 终端标记和 harness pid |
+| — | 不发布运行时不变式伴生入口；该服务定义只持有单个 provider 槽位，没有自己的事件流或可变数据关系。 |
 
 </details>
 

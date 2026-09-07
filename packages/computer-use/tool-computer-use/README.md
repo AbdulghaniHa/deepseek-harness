@@ -65,6 +65,7 @@ Tools call `ctx.computer` with `exec.agent` as owner. Snapshot refs are `${epoch
 | `src/snapshot.ts` | refs |
 | `src/approval.ts` | grants |
 | `src/prompt.ts` | `tool:computer` section |
+| — | No runtime invariant companion is published; this model-facing adapter owns no lifecycle stream, and execution relations belong to the `ctx.computer` seam it calls. |
 
 </details>
 

@@ -35,6 +35,9 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^"
   },
+  "optionalDependencies": {
+    "@simular-ai/simulang-js": "^13.0.0"
+  },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-computer-use": "workspace:^",

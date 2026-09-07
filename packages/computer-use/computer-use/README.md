@@ -62,6 +62,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 | `src/index.ts` | registry, grants, deny, hit-test |
 | `src/types.ts` | provider vocabulary and `ComputerError` |
 | `src/deny.ts` | terminal tokens and harness pid |
+| — | No runtime invariant companion is published; this Service Definition holds a single provider slot and no event stream or mutable data relation of its own. |
 
 </details>
 

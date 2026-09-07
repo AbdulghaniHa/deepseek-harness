@@ -65,6 +65,7 @@ kind: "package-reference"
 | `src/snapshot.ts` | refs |
 | `src/approval.ts` | 授权 |
 | `src/prompt.ts` | `tool:computer` 段落 |
+| — | 不发布运行时不变式伴生入口；该面向模型的适配器不拥有生命周期事件流，执行关系归其调用的 `ctx.computer` 能力接缝所有。 |
 
 </details>
 

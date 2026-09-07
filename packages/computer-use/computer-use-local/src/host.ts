@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline'
 import { ComputerError } from '@deepseek-ai/dsh-computer-use'
 import type { DesktopBackend } from './backend.ts'
 import { handleComputerMethod, errorPair } from './dispatch.ts'
+import { parseHostBackendFlags, type HostBackendOptions } from './flags.ts'
 import { createPlatformBackend } from './platform.ts'
 import { decodeLines, encodeLine, isRpcRequest, protocolMismatch, rpcFailure, rpcSuccess } from './protocol.ts'
 import { createSimulangBackend, loadSimulang } from './simulang.ts'
@@ -14,13 +15,15 @@ import { createSimulangBackend, loadSimulang } from './simulang.ts'
 /**
  * Resolve the desktop backend: simulang when present, otherwise the OS fallback.
  * @param load - optional native import override for tests.
+ * @param options - backend knobs parsed from the helper argv.
  * @returns a DesktopBackend.
  */
 export async function resolveBackend(
   load: typeof loadSimulang = loadSimulang,
+  options: HostBackendOptions = {},
 ): Promise<DesktopBackend> {
   const simulang = await load()
-  if (simulang !== undefined) return createSimulangBackend(simulang)
+  if (simulang !== undefined) return createSimulangBackend(simulang, options)
   return createPlatformBackend()
 }
 
@@ -70,9 +73,10 @@ export async function serveHost(
   }
 }
 
-/** Injectable streams and backend for {@link main}. */
+/** Injectable streams, argv, and backend for {@link main}. */
 export interface HostMainOptions {
   readonly backend?: DesktopBackend
+  readonly argv?: readonly string[]
   readonly input?: NodeJS.ReadableStream
   readonly output?: NodeJS.WritableStream
   readonly stderr?: NodeJS.WritableStream
@@ -80,11 +84,11 @@ export interface HostMainOptions {
 
 /**
  * Helper process entry. Not used by the plugin client except via spawn.
- * @param options - injectable streams and backend for tests.
+ * @param options - injectable streams, argv, and backend for tests.
  */
 export async function main(options: HostMainOptions = {}): Promise<void> {
   try {
-    const backend = options.backend ?? await resolveBackend()
+    const backend = options.backend ?? await resolveBackend(loadSimulang, parseHostBackendFlags(options.argv ?? process.argv))
     await serveHost(backend, options.input, options.output)
   } catch (error) {
     const message = error instanceof ComputerError ? error.message : error instanceof Error ? error.message : String(error)

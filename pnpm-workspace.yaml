@@ -38,6 +38,9 @@ allowBuilds:
   # them only because they ship lifecycle scripts, but those are no-ops we don't
   # need, so we deny them — install still succeeds.
   '@google/genai': false
+  # Prebuilt napi addon for computer-use accessibility; its postinstall only
+  # prints a Claude Code hint, so the binding loads without running it.
+  '@simular-ai/simulang-js': false
   protobufjs: false
   node-addon-require-builtin: false
   # JSONL durability calls MoveFileExW with write-through publication on Windows.

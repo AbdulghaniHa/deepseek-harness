@@ -17,7 +17,7 @@ Harness 需要模型驱动没有 CLI、API 或浏览器路径的 GUI 应用。�
 电脑操控是一等能力 seam，对齐浏览器系列：
 
 1. `@deepseek-ai/dsh-computer-use` 拥有 `ctx.computer`、提供方注册、按 owner 的应用授权、固定拒绝列表、坐标命中测试和 `ComputerError`。
-2. `@deepseek-ai/dsh-computer-use-local` 是已发布提供方，id 为 `local`。它通过 `ctx.subprocess` 启动 `lib/host.js`，并在 stdio 上使用换行分隔的 JSON-RPC。helper 在可用时加载 `@simular-ai/simulang-js`，否则使用操作系统回退（macOS 上的 `osascript` / `screencapture`）。崩溃会使进行中的调用失败并返回 `COMPUTER_HOST_CRASHED`；下一次调用会启动新 helper。
+2. `@deepseek-ai/dsh-computer-use-local` 是已发布提供方，id 为 `local`。它通过 `ctx.subprocess` 启动 `lib/host.js`，并在 stdio 上使用换行分隔的 JSON-RPC。helper 加载 `@simular-ai/simulang-js` v13，它被声明为可选依赖，因此 `pnpm install` 会拉取平台二进制（[适配器笔记](../bug-fix/2026-09-07-simulang-v13-adapter-and-optional-dependency.zh.md)），否则使用操作系统回退（macOS 上的 `osascript` / `screencapture`）。崩溃会使进行中的调用失败并返回 `COMPUTER_HOST_CRASHED`；下一次调用会启动新 helper。
 3. `@deepseek-ai/dsh-tool-computer-use` 拥有声明式 `computer_*` 工具、快照 refs（`epoch-eN`）、通过 `ctx.attachments.saveImage` 的截图附件、审批/授权、presenters 以及 `tool:computer` 提示段落（`TOOL_COMPUTER: 2160`）。
 
 提供方不注册工具。helper 宕机时工具仍保持注册，并在执行时以结构化 `ComputerError` 失败。`dsh-base` 挂载三行并将 `tool-computer-use.enabled` 设为 `false`。

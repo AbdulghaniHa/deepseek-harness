@@ -530,16 +530,23 @@ export interface ComputerRuntimeConfig {
 需要：`computer` · `subprocess`
 
 ```ts config-catalog
-/** Plugin config: helper RPC timeout and terminate grace. */
+/** Plugin config: helper RPC timeout, terminate grace, and window-list cache. */
 export interface Config {
   /** Per-RPC timeout in milliseconds. */
   requestTimeoutMs?: number
   /** SIGTERM-to-SIGKILL grace for the helper process tree, in milliseconds. */
   graceMs?: number
+  /**
+   * How long the native backend reuses one window enumeration for window and
+   * app reads, in milliseconds; `0` re-enumerates on every call. Enumeration
+   * walks every process and can take seconds, and the seam lists windows and
+   * apps before each action.
+   */
+  windowCacheMs?: number
 }
 ```
 
-来源：[`packages/computer-use/computer-use-local/src/index.ts:42`](../packages/computer-use/computer-use-local/src/index.ts)
+来源：[`packages/computer-use/computer-use-local/src/index.ts:61`](../packages/computer-use/computer-use-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 

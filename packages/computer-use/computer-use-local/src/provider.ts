@@ -24,7 +24,8 @@ import {
   type ComputerWindowId,
 } from '@deepseek-ai/dsh-computer-use'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
-import { ComputerHostClient, resolveHostArgv, type ComputerHostProcess } from './client.ts'
+import { ComputerHostClient, resolveHostArgv } from './client.ts'
+import { hostBackendFlags } from './flags.ts'
 
 /** Shipped provider id. */
 export const LOCAL_COMPUTER_PROVIDER_ID = 'local'
@@ -33,6 +34,8 @@ export const LOCAL_COMPUTER_PROVIDER_ID = 'local'
 export interface LocalComputerProviderOptions {
   readonly requestTimeoutMs: number
   readonly graceMs: number
+  /** Forwarded to the helper; see {@link hostBackendFlags}. */
+  readonly windowCacheMs: number
   readonly client?: ComputerHostClient
 }
 
@@ -77,9 +80,9 @@ export class LocalComputerProvider implements ComputerProvider {
           stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
           graceMs: options.graceMs,
         })
-        return handle as ComputerHostProcess
+        return handle
       },
-      argv: resolveHostArgv(),
+      argv: [...resolveHostArgv(), ...hostBackendFlags(options.windowCacheMs)],
     })
   }
 

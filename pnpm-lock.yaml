@@ -4160,6 +4160,10 @@ importers:
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess
+    optionalDependencies:
+      '@simular-ai/simulang-js':
+        specifier: ^13.0.0
+        version: 13.0.0
 
   packages/computer-use/tool-computer-use:
     dependencies:
@@ -12853,6 +12857,49 @@ packages:
   '@shikijs/vscode-textmate@10.0.2':
     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
 
+  '@simular-ai/simulang-js-darwin-arm64@13.0.0':
+    resolution: {integrity: sha512-CNk0MJ9KCDL57YrmEZ6fxz3VHEnTianUiAmfzK1DCDqnsrK4Ke8kAzbW4B4BkxAbKHMmA6QGkfG5X8bnvwd4nw==}
+    engines: {node: '>= 20'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@simular-ai/simulang-js-darwin-x64@13.0.0':
+    resolution: {integrity: sha512-7mgAUqGYmZwiu56UCgCyyDBFIDaV7IQe+7OkUh76jqMw2UZtDlD9Wj6Qb8OR/SzJq/oYbORvJfcvzolRpr9PZA==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@simular-ai/simulang-js-linux-arm64-gnu@13.0.0':
+    resolution: {integrity: sha512-Mx8MSHCdyj3AGA4SN5kTiRdKNDCaz5w7n5GHE/pVZSacU/gQel3lr265adgDko0jPvRcyz+7Lu1IRPN+qWlypA==}
+    engines: {node: '>= 20'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@simular-ai/simulang-js-linux-x64-gnu@13.0.0':
+    resolution: {integrity: sha512-7ziPSlLuECf0Kz0VsOn3iTdOF3k6tKhY+loHewsEtzVw+mFE4XxFANS4HyM8BiHeMIZXpIMHA9KMZMHf0pdzVQ==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@simular-ai/simulang-js-win32-arm64-msvc@13.0.0':
+    resolution: {integrity: sha512-NDjX4QIqbD+6a0eZM6v2LCC71/1HNwezRkHNcgFz/tpH/xXUuaeWsqydM0LoxnaEhgc574/YlPFhaWkHlhdT5A==}
+    engines: {node: '>= 20'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@simular-ai/simulang-js-win32-x64-msvc@13.0.0':
+    resolution: {integrity: sha512-7J/VJAB7gNkdP1lY4NdXmvnR7G3U8fPngqLuh56DwjED2rHJPCLDWML1OTaHVEOX93OrHv1lh1sg1P/1TJn6MA==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [win32]
+
+  '@simular-ai/simulang-js@13.0.0':
+    resolution: {integrity: sha512-eX4Jp71iMqwR010ABp0MtPWZkQi+Cpf5iYfzcJ4XW/6+oWO0jJ4mPMtr4WMiIJvTOaEwziL3EwWDbdAoXROahg==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
@@ -18461,6 +18508,34 @@ snapshots:
       '@types/hast': 3.0.5
 
   '@shikijs/vscode-textmate@10.0.2': {}
+
+  '@simular-ai/simulang-js-darwin-arm64@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js-darwin-x64@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js-linux-arm64-gnu@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js-linux-x64-gnu@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js-win32-arm64-msvc@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js-win32-x64-msvc@13.0.0':
+    optional: true
+
+  '@simular-ai/simulang-js@13.0.0':
+    optionalDependencies:
+      '@simular-ai/simulang-js-darwin-arm64': 13.0.0
+      '@simular-ai/simulang-js-darwin-x64': 13.0.0
+      '@simular-ai/simulang-js-linux-arm64-gnu': 13.0.0
+      '@simular-ai/simulang-js-linux-x64-gnu': 13.0.0
+      '@simular-ai/simulang-js-win32-arm64-msvc': 13.0.0
+      '@simular-ai/simulang-js-win32-x64-msvc': 13.0.0
+    optional: true
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
