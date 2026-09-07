@@ -1,0 +1,440 @@
+import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import ComputerRuntime, {
+  ComputerAppId,
+  ComputerError,
+  ComputerWindowId,
+  isDeniedApp,
+  isHarnessPid,
+  normalizeDenyToken,
+  TERMINAL_DENY_IDS,
+  type ComputerApp,
+  type ComputerProvider,
+  type ComputerRect,
+  type ComputerWindow,
+} from '@deepseek-ai/dsh-computer-use'
+
+function makeAgent(id: string): Agent {
+  return { id: SessionId(id) } as unknown as Agent
+}
+
+const BOUNDS: ComputerRect = { x: 0, y: 0, width: 800, height: 600 }
+
+function app(id: string, overrides: Partial<ComputerApp> = {}): ComputerApp {
+  return {
+    id: ComputerAppId(id),
+    name: id,
+    pid: 4000,
+    bundleId: `app.${id}`,
+    ...overrides,
+  }
+}
+
+function windowOf(id: string, appId: string, overrides: Partial<ComputerWindow> = {}): ComputerWindow {
+  return {
+    id: ComputerWindowId(id),
+    appId: ComputerAppId(appId),
+    title: id,
+    bounds: BOUNDS,
+    focused: false,
+    ...overrides,
+  }
+}
+
+function makeProvider(id: string, available: boolean, extras: Partial<ComputerProvider> = {}): ComputerProvider & {
+  clicks: { x: number; y: number }[]
+} {
+  const clicks: { x: number; y: number }[] = []
+  const first = app('notes')
+  const firstWindow = windowOf('w1', 'notes', { focused: true })
+  return {
+    id,
+    available: () => available,
+    capabilities: () => ['a11y', 'screenshot', 'input', 'clipboard'],
+    permissions: () => Promise.resolve({
+      accessibility: 'granted',
+      screenRecording: 'granted',
+      inputInjection: 'granted',
+    }),
+    listApps: () => Promise.resolve([first]),
+    listWindows: () => Promise.resolve([firstWindow]),
+    launchApp: request => Promise.resolve(app('launched', { name: request.name })),
+    focusWindow: () => Promise.resolve(),
+    windowAtPoint: (x, y) => Promise.resolve(windowOf('w1', 'notes', { bounds: { x, y, width: 1, height: 1 } })),
+    snapshot: request => Promise.resolve({
+      windowId: request.windowId,
+      appId: ComputerAppId('notes'),
+      title: 'Notes',
+      truncated: false,
+      nodes: [{
+        handle: 'n1',
+        role: 'button',
+        name: 'OK',
+        bounds: BOUNDS,
+        states: [],
+        supportsPress: true,
+        supportsSetValue: false,
+        secure: false,
+      }],
+    }),
+    screenshot: () => Promise.resolve({
+      png: new Uint8Array([1, 2, 3]),
+      width: 10,
+      height: 10,
+      scale: 1,
+      bounds: BOUNDS,
+    }),
+    press: () => Promise.resolve(),
+    setValue: () => Promise.resolve(),
+    click: (request) => {
+      clicks.push({ x: request.x, y: request.y })
+      return Promise.resolve()
+    },
+    type: () => Promise.resolve(),
+    key: () => Promise.resolve(),
+    scroll: () => Promise.resolve(),
+    drag: () => Promise.resolve(),
+    move: () => Promise.resolve(),
+    clipboardRead: () => Promise.resolve('clip'),
+    clipboardWrite: () => Promise.resolve(),
+    clicks,
+    ...extras,
+  }
+}
+
+async function mount(config: ConstructorParameters<typeof ComputerRuntime>[1] = {}): Promise<{
+  ctx: Context
+  computer: ComputerRuntime
+}> {
+  const ctx = new Context()
+  await ctx.plugin(ComputerRuntime, config)
+  return { ctx, computer: ctx.computer }
+}
+
+const available = true
+const unavailable = false
+
+describe('deny list', () => {
+  it('normalizes paths, bundle ids, and .app suffixes', () => {
+    expect(normalizeDenyToken('/Applications/Terminal.app')).toBe('terminal')
+    expect(normalizeDenyToken('COM.APPLE.TERMINAL')).toBe('com.apple.terminal')
+    expect(TERMINAL_DENY_IDS).toContain('com.apple.terminal')
+  })
+
+  it('matches terminals by name, bundle id, and extra tokens', () => {
+    expect(isDeniedApp(app('Terminal', { name: 'Terminal', bundleId: 'com.apple.Terminal' }))).toBe(true)
+    expect(isDeniedApp(app('notes'))).toBe(false)
+    expect(isDeniedApp(app('secret', { name: 'Secret' }), ['secret'])).toBe(true)
+  })
+
+  it('treats this process and its parent as the harness', () => {
+    expect(isHarnessPid(process.pid)).toBe(true)
+    expect(isHarnessPid(process.ppid)).toBe(true)
+    expect(isHarnessPid(1)).toBe(false)
+  })
+})
+
+describe('ComputerRuntime registration', () => {
+  it('registers a provider and unregisters it via the returned disposer', async () => {
+    const { computer } = await mount()
+    const provider = makeProvider('local', available)
+    const dispose = computer.registerProvider(provider)
+    await expect(computer.listApps()).resolves.toHaveLength(1)
+    dispose()
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_UNAVAILABLE' }))
+  })
+
+  it('throws COMPUTER_DUPLICATE_PROVIDER on a duplicate id', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    expect(() => computer.registerProvider(makeProvider('local', available)))
+      .toThrow(expect.objectContaining({ code: 'COMPUTER_DUPLICATE_PROVIDER' }))
+  })
+
+  it('disposes provider registrations when the contributing fiber is disposed (HMR safety)', async () => {
+    const { ctx, computer } = await mount()
+    const fiber = await ctx.plugin(Object.assign((inner: Context) => {
+      inner.computer.registerProvider(makeProvider('local', available))
+    }, { inject: ['computer'] }))
+    await expect(computer.listApps()).resolves.toHaveLength(1)
+    await fiber.dispose()
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_UNAVAILABLE' }))
+  })
+})
+
+describe('ComputerRuntime execution resolution', () => {
+  it('throws COMPUTER_PROVIDER_UNAVAILABLE when nothing is registered', async () => {
+    const { computer } = await mount()
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_UNAVAILABLE' }))
+    expect(computer.capabilities()).toEqual([])
+  })
+
+  it('throws COMPUTER_PROVIDER_UNAVAILABLE when providers exist but none are usable', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', unavailable))
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_UNAVAILABLE' }))
+  })
+
+  it('throws COMPUTER_PROVIDER_CONFIGURED_MISSING for an unregistered configured id', async () => {
+    const { computer } = await mount({ provider: 'missing' })
+    computer.registerProvider(makeProvider('local', available))
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_CONFIGURED_MISSING' }))
+  })
+
+  it('throws COMPUTER_PROVIDER_CONFIGURED_UNAVAILABLE for an unusable configured id', async () => {
+    const { computer } = await mount({ provider: 'local' })
+    computer.registerProvider(makeProvider('local', unavailable))
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_CONFIGURED_UNAVAILABLE' }))
+  })
+
+  it('throws COMPUTER_PROVIDER_AMBIGUOUS rather than picking by order', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    computer.registerProvider(makeProvider('remote', available))
+    await expect(computer.listApps()).rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_PROVIDER_AMBIGUOUS' }))
+  })
+
+  it('runs the configured provider even when another usable provider is registered', async () => {
+    const { computer } = await mount({ provider: 'remote' })
+    computer.registerProvider(makeProvider('local', available))
+    computer.registerProvider(makeProvider('remote', available, {
+      listApps: () => Promise.resolve([app('remote')]),
+    }))
+    await expect(computer.listApps()).resolves.toEqual([expect.objectContaining({ id: 'remote' })])
+  })
+
+  it('auto-selects the single usable provider and reports capabilities', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    expect(computer.capabilities()).toEqual(['a11y', 'screenshot', 'input', 'clipboard'])
+    await expect(computer.permissions()).resolves.toMatchObject({ accessibility: 'granted' })
+    await expect(computer.listWindows()).resolves.toHaveLength(1)
+    await expect(computer.clipboardRead()).resolves.toBe('clip')
+  })
+
+  it('rethrows non-ComputerError from capabilities()', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      available: () => {
+        throw new TypeError('boom')
+      },
+    }))
+    expect(() => computer.capabilities()).toThrow(TypeError)
+  })
+})
+
+describe('ComputerRuntime grants and deny', () => {
+  it('records, lists, and revokes per-owner grants', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    const other = makeAgent('b')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    expect(computer.hasGrant(owner, ComputerAppId('notes'))).toBe(true)
+    expect(computer.listGrants(owner)).toEqual([
+      expect.objectContaining({ appId: 'notes', scope: 'session', owner }),
+    ])
+    expect(computer.listGrants(other)).toEqual([])
+    computer.revoke(owner, ComputerAppId('notes'))
+    expect(computer.hasGrant(owner, ComputerAppId('notes'))).toBe(false)
+  })
+
+  it('rejects mutating calls without a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    await expect(computer.focusWindow(owner, ComputerWindowId('w1')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_NOT_ALLOWED' }))
+  })
+
+  it('rejects the fixed terminal deny list even with a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      listApps: () => Promise.resolve([app('Terminal', { name: 'Terminal', bundleId: 'com.apple.Terminal' })]),
+      listWindows: () => Promise.resolve([windowOf('w1', 'Terminal')]),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('Terminal'), 'session')
+    await expect(computer.focusWindow(owner, ComputerWindowId('w1')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_DENIED' }))
+  })
+
+  it('rejects the harness pid even with a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      listApps: () => Promise.resolve([app('notes', { pid: process.pid })]),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.focusWindow(owner, ComputerWindowId('w1')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_DENIED' }))
+  })
+
+  it('rejects extra configured deny tokens', async () => {
+    const { computer } = await mount({ deniedApps: ['notes'] })
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.focusWindow(owner, ComputerWindowId('w1')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_DENIED' }))
+  })
+
+  it('consumes a once grant on a mutating call and keeps a session grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'once')
+    await computer.focusWindow(owner, ComputerWindowId('w1'))
+    expect(computer.hasGrant(owner, ComputerAppId('notes'))).toBe(false)
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.focusWindow(owner, ComputerWindowId('w1'))
+    expect(computer.hasGrant(owner, ComputerAppId('notes'))).toBe(true)
+  })
+
+  it('does not consume a once grant on snapshot or screenshot', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'once')
+    await computer.snapshot(owner, { windowId: ComputerWindowId('w1'), maxNodes: 10 })
+    await computer.screenshot(owner, { windowId: ComputerWindowId('w1') })
+    expect(computer.hasGrant(owner, ComputerAppId('notes'))).toBe(true)
+  })
+})
+
+describe('ComputerRuntime actions', () => {
+  it('launches, snapshots, presses, types, and keys under a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('launched'), 'session')
+    const launched = await computer.launchApp(owner, { name: 'Notes' })
+    expect(launched.name).toBe('Notes')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    const snapshot = await computer.snapshot(owner, { windowId: ComputerWindowId('w1'), maxNodes: 20 })
+    expect(snapshot.nodes[0]?.name).toBe('OK')
+    await computer.press(owner, ComputerWindowId('w1'), 'n1')
+    await computer.setValue(owner, ComputerWindowId('w1'), 'n1', 'hello')
+    await computer.type(owner, ComputerWindowId('w1'), 'hello')
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Enter' })
+    await computer.clipboardWrite(owner, 'x')
+  })
+
+  it('hit-tests coordinate actions and rejects a foreign window', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      windowAtPoint: () => Promise.resolve(windowOf('other', 'chrome')),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.click(owner, ComputerWindowId('w1'), { x: 10, y: 10 }))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_TARGET_MISMATCH' }))
+  })
+
+  it('forwards click, scroll, drag, and move when the hit matches', async () => {
+    const { computer } = await mount()
+    const provider = makeProvider('local', available)
+    computer.registerProvider(provider)
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.click(owner, ComputerWindowId('w1'), { x: 4, y: 5 })
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.scroll(owner, ComputerWindowId('w1'), { x: 4, y: 5, direction: 'down', amount: 1 })
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.drag(owner, ComputerWindowId('w1'), { fromX: 1, fromY: 1, toX: 2, toY: 2 })
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.move(owner, ComputerWindowId('w1'), { x: 3, y: 3 })
+    expect(provider.clicks).toEqual([{ x: 4, y: 5 }])
+  })
+
+  it('allows a hit-test miss (undefined) after a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      windowAtPoint: () => Promise.resolve(undefined),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.click(owner, ComputerWindowId('w1'), { x: 1, y: 1 })
+  })
+
+  it('throws COMPUTER_WINDOW_GONE for an unknown window', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.focusWindow(owner, ComputerWindowId('missing')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_WINDOW_GONE' }))
+  })
+
+  it('throws COMPUTER_WINDOW_GONE when the app disappears', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      listApps: () => Promise.resolve([]),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.focusWindow(owner, ComputerWindowId('w1')))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_WINDOW_GONE' }))
+  })
+
+  it('rejects clipboard write without any grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    await expect(computer.clipboardWrite(makeAgent('a'), 'x'))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_NOT_ALLOWED' }))
+  })
+
+  it('screenshots a full display without a window grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const shot = await computer.screenshot(makeAgent('a'), {})
+    expect(shot.width).toBe(10)
+  })
+
+  it('denies launching a terminal or the harness process', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      launchApp: request => Promise.resolve(
+        request.name === 'Terminal'
+          ? app('Terminal', { name: 'Terminal', bundleId: 'com.apple.Terminal' })
+          : app('notes', { pid: process.pid }),
+      ),
+    }))
+    const owner = makeAgent('a')
+    await expect(computer.launchApp(owner, { name: 'Terminal' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_DENIED' }))
+    await expect(computer.launchApp(owner, { name: 'Notes' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_APP_DENIED' }))
+  })
+
+  it('selects DSH_COMPUTER_PROVIDER and treats omitted deniedApps as empty', async () => {
+    const previous = process.env.DSH_COMPUTER_PROVIDER
+    process.env.DSH_COMPUTER_PROVIDER = 'remote'
+    try {
+      const { computer } = await mount()
+      computer.registerProvider(makeProvider('local', available))
+      computer.registerProvider(makeProvider('remote', available, {
+        listApps: () => Promise.resolve([app('remote')]),
+      }))
+      await expect(computer.listApps()).resolves.toEqual([expect.objectContaining({ id: 'remote' })])
+    } finally {
+      if (previous === undefined) delete process.env.DSH_COMPUTER_PROVIDER
+      else process.env.DSH_COMPUTER_PROVIDER = previous
+    }
+    const ctx = new Context()
+    const runtime = new ComputerRuntime(ctx, {})
+    runtime.registerProvider(makeProvider('local', available))
+    expect(runtime.capabilities()).toContain('a11y')
+  })
+})
+
+describe('ComputerError', () => {
+  it('is a HarnessError with a stable code', () => {
+    const error = new ComputerError('nope', 'COMPUTER_APP_DENIED')
+    expect(error).toBeInstanceOf(Error)
+    expect(error.code).toBe('COMPUTER_APP_DENIED')
+    expect(error.name).toBe('ComputerError')
+  })
+})

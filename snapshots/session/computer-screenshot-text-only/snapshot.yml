@@ -1,0 +1,8 @@
+version: 1
+scenario: computer-screenshot-text-only
+profile: headless
+composition: computer-screenshot
+recording: authored
+header:
+  class: computer-screenshot
+  pin: true

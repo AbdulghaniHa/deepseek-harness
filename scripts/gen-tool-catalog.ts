@@ -66,6 +66,8 @@ import { registerListSubagentModels } from '../packages/subagent/tool-subagent/s
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import BrowserRuntime from '@deepseek-ai/dsh-browser'
 import * as ToolBrowser from '@deepseek-ai/dsh-tool-browser'
+import ComputerRuntime from '@deepseek-ai/dsh-computer-use'
+import * as ToolComputerUse from '@deepseek-ai/dsh-tool-computer-use'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
@@ -604,6 +606,19 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-computer-use',
+    dir: 'tool-computer-use',
+    source: 'packages/computer-use/tool-computer-use/src/index.ts',
+    requires: ['ctx.tools', 'ctx.computer', 'ctx.systemPrompt', 'ctx.approval optional at call time'],
+    writes: ['tool/call', 'tool/result', 'computer/app-grant'],
+    async mount(ctx) {
+      await ctx.plugin(ComputerRuntime)
+      await ctx.plugin(ToolComputerUse)
+    },
+    note:
+      'computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`.',
   },
 ]
 

@@ -173,6 +173,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
     'bin/dsh-browser-host.cmd',
     'extension',
   ],
+  '@deepseek-ai/dsh-computer-use-local': ['lib/host.js'],
 }
 
 function sameStringList(actual: readonly string[] | undefined, expected: readonly string[]): boolean {

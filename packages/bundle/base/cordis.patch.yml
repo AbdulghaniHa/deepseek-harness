@@ -480,6 +480,21 @@
         approval: user-tabs
         allowRawCdp: false
 
+    # Computer-use seam. Tools stay registered when the helper is down and
+    # fail at execution with a structured ComputerError. enabled stays false:
+    # desktop automation is an explicit product opt-in.
+    - id: computer
+      name: '@deepseek-ai/dsh-computer-use'
+
+    - id: computer-use-local
+      name: '@deepseek-ai/dsh-computer-use-local'
+
+    - id: tool-computer-use
+      name: '@deepseek-ai/dsh-tool-computer-use'
+      config:
+        enabled: false
+        approval: apps
+
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 
     # The tool registry. Presentation mode is a deployment choice; omitting it here

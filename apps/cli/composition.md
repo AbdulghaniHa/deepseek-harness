@@ -174,6 +174,12 @@ flowchart LR
   cfg --> plugin_dsh_base_browser_chrome_extension
   plugin_dsh_base_tool_browser["tool-browser<br/>@deepseek-ai/dsh-tool-browser"]
   cfg --> plugin_dsh_base_tool_browser
+  plugin_dsh_base_computer["computer<br/>@deepseek-ai/dsh-computer-use"]
+  cfg --> plugin_dsh_base_computer
+  plugin_dsh_base_computer_use_local["computer-use-local<br/>@deepseek-ai/dsh-computer-use-local"]
+  cfg --> plugin_dsh_base_computer_use_local
+  plugin_dsh_base_tool_computer_use["tool-computer-use<br/>@deepseek-ai/dsh-tool-computer-use"]
+  cfg --> plugin_dsh_base_tool_computer_use
   plugin_dsh_base_tools["tools<br/>@deepseek-ai/dsh-tools"]
   cfg --> plugin_dsh_base_tools
   plugin_dsh_base_system_prompt["system-prompt<br/>@deepseek-ai/dsh-system-prompt"]
@@ -271,6 +277,9 @@ flowchart LR
 | `browser` | `@deepseek-ai/dsh-browser` |
 | `browser-chrome-extension` | `@deepseek-ai/dsh-browser-chrome-extension` |
 | `tool-browser` | `@deepseek-ai/dsh-tool-browser` |
+| `computer` | `@deepseek-ai/dsh-computer-use` |
+| `computer-use-local` | `@deepseek-ai/dsh-computer-use-local` |
+| `tool-computer-use` | `@deepseek-ai/dsh-tool-computer-use` |
 | `tools` | `@deepseek-ai/dsh-tools` |
 | `system-prompt` | `@deepseek-ai/dsh-system-prompt` |
 | `agent-loop` | `@deepseek-ai/dsh-agent-loop` |

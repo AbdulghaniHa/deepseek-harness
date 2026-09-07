@@ -1,0 +1,8 @@
+version: 1
+scenario: computer-apps
+profile: headless
+composition: computer
+recording: authored
+header:
+  class: computer
+  pin: true

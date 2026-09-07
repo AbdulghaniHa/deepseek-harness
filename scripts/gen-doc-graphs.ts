@@ -606,6 +606,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'The Chrome Native Messaging provider registers into one ctx.browser seam; tool-browser owns the stable model-facing browser_* names.',
   },
   {
+    key: 'computer',
+    pkg: 'computer-use',
+    title: 'Computer-use provider registry',
+    mode: 'seam',
+    implementations: ['computer-use-local'],
+    consumers: ['tool-computer-use'],
+    note: 'The local helper provider registers into one ctx.computer seam; tool-computer-use owns the stable model-facing computer_* names.',
+  },
+  {
     key: 'spillStore',
     pkg: 'spill',
     title: 'Spill storage seam',

@@ -12,7 +12,7 @@
  *
  * `web` is a hardcoded alias for `--profile web`; `plugin` manages a profile's
  * plugin dependencies by forwarding to pnpm; `browser` installs the Chrome
- * native-messaging host.
+ * native-messaging host; `computer doctor` probes desktop-automation permissions.
  * @module @deepseek-ai/dsh/args
  */
 
@@ -54,8 +54,15 @@ interface BrowserInvocation {
   extensionId?: string
 }
 
+/** Probe computer-use OS permissions. */
+interface ComputerInvocation {
+  mode: 'computer'
+  action: 'doctor'
+  request: boolean
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | BrowserInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | BrowserInvocation | ComputerInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -215,6 +222,18 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
         browser: name,
         ...extensionId === undefined ? {} : { extensionId },
       }
+    })
+
+  const computer = program.command('computer').description('probe OS permissions used by computer_* tools')
+  computer
+    .argument('<action>', 'doctor')
+    .option('--request', 'trigger an OS permission prompt when the platform supports it', false)
+    .action((action: string, options: { request?: boolean }) => {
+      rejectParentOptions('computer')
+      if (action !== 'doctor') {
+        program.error('error: computer action must be doctor')
+      }
+      resolved = { mode: 'computer', action: 'doctor', request: options.request === true }
     })
 
   try {

@@ -825,6 +825,139 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'computer',
+    summary: 'The computer-use access service.',
+    description: 'The computer-use access service. Registered as `ctx.computer` (one instance per context).\n\nSelection semantics (resolved at execution time, never order-dependent):\n\n- A configured id that is registered and `available()` → that provider.\n- A configured id not registered → `COMPUTER_PROVIDER_CONFIGURED_MISSING`.\n- A configured id registered but unavailable → `COMPUTER_PROVIDER_CONFIGURED_UNAVAILABLE`.\n- No id configured, exactly one registered usable provider → that provider.\n- No id configured, multiple usable providers → `COMPUTER_PROVIDER_AMBIGUOUS`.\n- No id configured, no usable provider → `COMPUTER_PROVIDER_UNAVAILABLE`.',
+    methods: [
+      {
+        signature: 'registerProvider(provider: ComputerProvider): () => void',
+        description: 'Register a computer-use provider. Throws ComputerError `COMPUTER_DUPLICATE_PROVIDER` if its id is already registered. Returns a disposer; disposed with the calling fiber.',
+        parameters: [{ name: 'provider', description: 'the provider; its `id` is the registry key.' }],
+        returns: 'the disposer that unregisters the provider.',
+      },
+      {
+        signature: 'capabilities(): readonly ComputerCapability[]',
+        description: 'Facets the selected provider currently advertises.',
+        parameters: [],
+        returns: 'the provider\'s capability list, or an empty list when none is usable.',
+      },
+      {
+        signature: 'async permissions(signal?: AbortSignal): Promise<ComputerPermissions>',
+        description: 'Probe OS permissions through the selected provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'accessibility, screen-recording, and input-injection state.',
+      },
+      {
+        signature: 'async listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>',
+        description: 'List running applications through the selected provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the current application list.',
+      },
+      {
+        signature: 'async listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>',
+        description: 'List windows, optionally restricted to one application.',
+        parameters: [{ name: 'appId', description: 'optional application filter.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'matching windows.',
+      },
+      {
+        signature: 'grant(owner: Agent, appId: ComputerAppId, scope: ComputerGrantScope): void',
+        description: 'Record a grant for `owner` on `appId`. Does not consume a `once` grant.',
+        parameters: [{ name: 'owner', description: 'exact Agent that received the grant.' }, { name: 'appId', description: 'application the grant covers.' }, { name: 'scope', description: 'once (next mutating call) or session.' }],
+      },
+      {
+        signature: 'revoke(owner: Agent, appId: ComputerAppId): void',
+        description: 'Drop one owner grant.',
+        parameters: [{ name: 'owner', description: 'exact Agent that holds the grant.' }, { name: 'appId', description: 'application to revoke.' }],
+      },
+      {
+        signature: 'listGrants(owner: Agent): readonly ComputerGrant[]',
+        description: 'Grants currently held by `owner`.',
+        parameters: [{ name: 'owner', description: 'exact Agent whose grants to list.' }],
+        returns: 'a fresh snapshot of that owner\'s grants.',
+      },
+      {
+        signature: 'hasGrant(owner: Agent, appId: ComputerAppId): boolean',
+        description: 'Whether `owner` currently holds a grant for `appId`.',
+        parameters: [{ name: 'owner', description: 'exact Agent.' }, { name: 'appId', description: 'application to check.' }],
+        returns: 'true when a once or session grant is recorded.',
+      },
+      {
+        signature: 'async launchApp(owner: Agent, request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>',
+        description: 'Launch an application after the deny-list check. A grant is not required because the launched identity is not known until the provider returns; consumers then run the grant flow on the result.',
+        parameters: [{ name: 'owner', description: 'exact Agent that will own a later grant (reserved for deny ancestry).' }, { name: 'request', description: 'application name.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the launched application.',
+      },
+      {
+        signature: 'async focusWindow(owner: Agent, windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>',
+        description: 'Focus a window the owner is granted to use.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window to focus.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async snapshot(owner: Agent, request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>',
+        description: 'Accessibility snapshot of a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'request', description: 'window, node cap, and optional query.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the snapshot.',
+      },
+      {
+        signature: 'async screenshot(owner: Agent, request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>',
+        description: 'Capture a screenshot. A window-scoped capture requires a grant; a full display capture requires a grant on the focused window\'s app when one exists.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'request', description: 'window, display, or region.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'PNG bytes plus logical bounds.',
+      },
+      {
+        signature: 'async press(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: AbortSignal): Promise<void>',
+        description: 'Invoke the accessibility press action on a node in a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'handle', description: 'provider node handle.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async setValue(owner: Agent, windowId: ComputerWindowId, handle: string, text: string, signal?: AbortSignal): Promise<void>',
+        description: 'Set an accessibility value on a node in a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'handle', description: 'provider node handle.' }, { name: 'text', description: 'replacement value.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async click(owner: Agent, windowId: ComputerWindowId, request: ComputerClickRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Synthesized click after deny, grant, and hit-test checks.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'coordinates and button.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async type(owner: Agent, windowId: ComputerWindowId, text: string, signal?: AbortSignal): Promise<void>',
+        description: 'Type text at the current focus after a grant check on `windowId`.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'text', description: 'literal text.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async key(owner: Agent, windowId: ComputerWindowId, request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Press a key after a grant check on `windowId`.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'key and modifiers.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async scroll(owner: Agent, windowId: ComputerWindowId, request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Scroll after deny, grant, and hit-test checks.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'coordinates, direction, and amount.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async drag(owner: Agent, windowId: ComputerWindowId, request: ComputerDragRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Drag after deny, grant, and hit-test checks on both endpoints.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'start and end coordinates.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async move(owner: Agent, windowId: ComputerWindowId, request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void>',
+        description: 'Move the pointer after deny, grant, and hit-test checks.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'destination coordinates.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async clipboardRead(signal?: AbortSignal): Promise<string>',
+        description: 'Read the clipboard. Observation-only; no grant is consumed.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'clipboard text.',
+      },
+      {
+        signature: 'async clipboardWrite(owner: Agent, text: string, signal?: AbortSignal): Promise<void>',
+        description: 'Write the clipboard. Requires a session-or-once grant on any currently granted app so a grant-less agent cannot exfiltrate through the clipboard.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns at least one grant.' }, { name: 'text', description: 'clipboard replacement.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+    ],
+  },
+  {
     key: 'credentials',
     summary: 'Abstract credential service over two key spaces that answer two questions.',
     description: 'Abstract credential service over two key spaces that answer two questions.\n\nA CredentialRef answers "what is behind this environment-variable name", layered over the process environment, the provider-managed store, and `.env` files. One seam-wide rule binds that half: an empty stored value is absent everywhere — `resolve` skips it, `describe` reports it unconfigured — so a blank never masquerades as a configured secret.\n\nA CredentialKey answers "what credential does this plugin hold for this id". Nothing can layer here — an authorization grant has no environment to be read from — so presence of the record is the whole fact, and modifyRecord is the only write path because a correct write depends on the current value (a token refresh is read-decide-replace under one lock).',
@@ -3949,6 +4082,82 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompositionRowEnablement',
     declaration: 'export type CompositionRowEnablement = boolean | \'conditional\';',
+  },
+  {
+    name: 'ComputerApp',
+    declaration: 'export interface ComputerApp {\n    readonly id: ComputerAppId;\n    readonly name: string;\n    readonly pid: number;\n    readonly bundleId?: string;\n    readonly path?: string;\n}',
+  },
+  {
+    name: 'ComputerCapability',
+    declaration: 'export type ComputerCapability = \'a11y\' | \'screenshot\' | \'input\' | \'clipboard\' | \'background-actions\';',
+  },
+  {
+    name: 'ComputerClickRequest',
+    declaration: 'export interface ComputerClickRequest {\n    readonly x: number;\n    readonly y: number;\n    readonly button?: \'left\' | \'right\' | \'middle\';\n    readonly count?: number;\n    readonly modifiers?: readonly string[];\n}',
+  },
+  {
+    name: 'ComputerDragRequest',
+    declaration: 'export interface ComputerDragRequest {\n    readonly fromX: number;\n    readonly fromY: number;\n    readonly toX: number;\n    readonly toY: number;\n    readonly modifiers?: readonly string[];\n}',
+  },
+  {
+    name: 'ComputerGrant',
+    declaration: 'export interface ComputerGrant {\n    readonly appId: ComputerAppId;\n    readonly scope: ComputerGrantScope;\n    readonly owner: Agent;\n}',
+  },
+  {
+    name: 'ComputerGrantScope',
+    declaration: 'export type ComputerGrantScope = \'once\' | \'session\';',
+  },
+  {
+    name: 'ComputerKeyRequest',
+    declaration: 'export interface ComputerKeyRequest {\n    readonly key: string;\n    readonly modifiers?: readonly string[];\n    readonly repeat?: number;\n}',
+  },
+  {
+    name: 'ComputerLaunchRequest',
+    declaration: 'export interface ComputerLaunchRequest {\n    readonly name: string;\n}',
+  },
+  {
+    name: 'ComputerPermissions',
+    declaration: 'export interface ComputerPermissions {\n    readonly accessibility: ComputerPermissionState;\n    readonly screenRecording: ComputerPermissionState;\n    readonly inputInjection: ComputerPermissionState;\n}',
+  },
+  {
+    name: 'ComputerPermissionState',
+    declaration: 'export type ComputerPermissionState = \'granted\' | \'denied\' | \'unknown\' | \'not-required\';',
+  },
+  {
+    name: 'ComputerProvider',
+    declaration: 'export interface ComputerProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly ComputerCapability[];\n    permissions(signal?: AbortSignal): Promise<ComputerPermissions>;\n    listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>;\n    listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>;\n    launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>;\n    focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>;\n    windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>;\n    snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>;\n    screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>;\n    press(handle: string, signal?: AbortSignal): Promise<void>;\n    setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>;\n    click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>;\n    type(text: string, signal?: AbortSignal): Promise<void>;\n    key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>;\n    scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>;\n    drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>;\n    move(request: {\n        readonly x: number;\n        readonly y: number;\n    }, signal?: AbortSignal): Promise<void>;\n    clipboardR /* …truncated — full shape in source */',
+  },
+  {
+    name: 'ComputerRect',
+    declaration: 'export interface ComputerRect {\n    readonly x: number;\n    readonly y: number;\n    readonly width: number;\n    readonly height: number;\n}',
+  },
+  {
+    name: 'ComputerScreenshot',
+    declaration: 'export interface ComputerScreenshot {\n    readonly png: Uint8Array;\n    readonly width: number;\n    readonly height: number;\n    readonly scale: number;\n    readonly bounds: ComputerRect;\n}',
+  },
+  {
+    name: 'ComputerScreenshotRequest',
+    declaration: 'export interface ComputerScreenshotRequest {\n    readonly windowId?: ComputerWindowId;\n    readonly displayId?: number;\n    readonly region?: ComputerRect;\n}',
+  },
+  {
+    name: 'ComputerScrollRequest',
+    declaration: 'export interface ComputerScrollRequest {\n    readonly x: number;\n    readonly y: number;\n    readonly direction: \'up\' | \'down\' | \'left\' | \'right\';\n    readonly amount: number;\n    readonly modifiers?: readonly string[];\n}',
+  },
+  {
+    name: 'ComputerSnapshot',
+    declaration: 'export interface ComputerSnapshot {\n    readonly windowId: ComputerWindowId;\n    readonly appId: ComputerAppId;\n    readonly title: string;\n    readonly nodes: readonly ComputerSnapshotNode[];\n    readonly truncated: boolean;\n}',
+  },
+  {
+    name: 'ComputerSnapshotNode',
+    declaration: 'export interface ComputerSnapshotNode {\n    readonly handle: string;\n    readonly role: string;\n    readonly name: string;\n    readonly value?: string;\n    readonly bounds: ComputerRect;\n    readonly states: readonly string[];\n    readonly supportsPress: boolean;\n    readonly supportsSetValue: boolean;\n    readonly secure: boolean;\n    readonly children?: readonly ComputerSnapshotNode[];\n}',
+  },
+  {
+    name: 'ComputerSnapshotRequest',
+    declaration: 'export interface ComputerSnapshotRequest {\n    readonly windowId: ComputerWindowId;\n    readonly maxNodes: number;\n    readonly query?: string;\n}',
+  },
+  {
+    name: 'ComputerWindow',
+    declaration: 'export interface ComputerWindow {\n    readonly id: ComputerWindowId;\n    readonly appId: ComputerAppId;\n    readonly title: string;\n    readonly bounds: ComputerRect;\n    readonly focused: boolean;\n}',
   },
   {
     name: 'ConfinedArgv',

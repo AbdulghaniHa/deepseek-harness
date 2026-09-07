@@ -30,6 +30,9 @@
       "path": "../../packages/browser/browser-chrome-extension"
     },
     {
+      "path": "../../packages/computer-use/computer-use-local"
+    },
+    {
       "path": "../../packages/bundle/headless"
     },
     {

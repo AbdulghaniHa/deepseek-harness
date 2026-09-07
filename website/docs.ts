@@ -178,6 +178,14 @@ const homeAndGuide = pairedPages([
     section: { root: '集成', en: 'Integrations' },
     order: 2,
   },
+  {
+    source: 'docs/user/guide/computer-use.md',
+    route: 'guide/computer-use.md',
+    label: { root: '电脑操控', en: 'Computer use' },
+    sidebar: { root: 'zh-guide', en: 'en-guide' },
+    section: { root: '集成', en: 'Integrations' },
+    order: 3,
+  },
 ])
 
 const develop = pairedPages([
@@ -337,6 +345,7 @@ const subsystemGroups = [
     ['code-runtime.md', '代码运行时', 'Code runtime'],
     ['web.md', 'Web 访问', 'Web access'],
     ['browser.md', '浏览器自动化', 'Browser automation'],
+    ['computer-use.md', '电脑操控', 'Computer use'],
     ['skills.md', '技能', 'Skills'],
     ['workflow.md', '工作流', 'Workflows'],
     ['subagent.md', '子代理', 'Subagents'],

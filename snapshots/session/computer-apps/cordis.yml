@@ -1,0 +1,18 @@
+# Computer-apps composition: disable the local helper and register a
+# deterministic in-process provider so replay can execute computer_* tools.
+- insert:
+    - id: computer-apps-fixture
+      name: './computer-apps-fixture.mjs'
+
+- id: computer
+  name: '@deepseek-ai/dsh-computer-use'
+
+- id: computer-use-local
+  name: '@deepseek-ai/dsh-computer-use-local'
+  disabled: true
+
+- id: tool-computer-use
+  name: '@deepseek-ai/dsh-tool-computer-use'
+  config:
+    enabled: true
+    approval: never

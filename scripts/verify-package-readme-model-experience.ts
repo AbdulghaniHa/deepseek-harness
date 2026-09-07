@@ -183,6 +183,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/util/native-command': { kind: 'none', reason: 'The host-side subprocess runner registers nothing model-facing.' },
   'packages/browser/browser': { kind: 'indirect', reason: 'The service interface delegates model rendering to dsh-tool-browser.' },
   'packages/browser/browser-chrome-extension': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-browser.' },
+  'packages/computer-use/computer-use': { kind: 'indirect', reason: 'The service interface delegates model rendering to dsh-tool-computer-use.' },
+  'packages/computer-use/computer-use-local': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-computer-use.' },
   'packages/web/web': { kind: 'indirect', reason: 'The provider registry delegates model rendering to dsh-tool-web.' },
   'packages/web/web-fetch-http': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
   'packages/web/web-search-exa': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },

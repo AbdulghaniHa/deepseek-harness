@@ -53,6 +53,15 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-browser')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-browser-chrome-extension')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-tool-browser')
+    expect(rows.find(row => row.id === 'computer')).toBeDefined()
+    expect(rows.find(row => row.id === 'computer-use-local')).toBeDefined()
+    expect(rows.find(row => row.id === 'tool-computer-use')?.config).toMatchObject({
+      enabled: false,
+      approval: 'apps',
+    })
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-computer-use')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-computer-use-local')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-tool-computer-use')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-web-fetch-http')

@@ -45,6 +45,11 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'profile', profile: 'tui', patches: ['a.yml'], args: ['--resume', 'b', '--patch', 'late.yml'] })
   })
 
+  it('routes the computer doctor', () => {
+    expect(parse(['computer', 'doctor'])).toEqual({ mode: 'computer', action: 'doctor', request: false })
+    expect(parse(['computer', 'doctor', '--request'])).toEqual({ mode: 'computer', action: 'doctor', request: true })
+  })
+
   it('routes the browser native-host manager', () => {
     expect(parse(['browser', 'install'])).toEqual({ mode: 'browser', action: 'install', browser: 'chrome' })
     expect(parse(['browser', 'status', '--browser', 'edge']))
@@ -115,6 +120,8 @@ describe('parseDshArgs', () => {
     expect(exitCode(['browser', 'install', '--browser', 'safari'])).toBe(1)
     expect(exitCode(['browser', 'install', '--extension-id', 'not-an-id'])).toBe(1)
     expect(exitCode(['--profile', 'x', 'browser', 'install'])).toBe(1)
+    expect(exitCode(['computer', 'status'])).toBe(1)
+    expect(exitCode(['--profile', 'x', 'computer', 'doctor'])).toBe(1)
   })
 
   it('keeps its own help for an invocation with no app to hand it to', () => {

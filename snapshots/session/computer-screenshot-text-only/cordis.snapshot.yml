@@ -1,0 +1,32 @@
+# Keyless replay counterpart: deterministic computer provider; model adapter is
+# replaced by replay. The default route stays text-only.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  disabled: true
+
+- insert:
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: deepseek-official
+            name: DeepSeek
+            models:
+              - id: deepseek-v4-flash
+              - id: deepseek-v4-pro
+
+    - id: computer-apps-fixture
+      name: './computer-apps-fixture.mjs'
+
+- id: computer
+  name: '@deepseek-ai/dsh-computer-use'
+
+- id: computer-use-local
+  name: '@deepseek-ai/dsh-computer-use-local'
+  disabled: true
+
+- id: tool-computer-use
+  name: '@deepseek-ai/dsh-tool-computer-use'
+  config:
+    enabled: true
+    approval: never

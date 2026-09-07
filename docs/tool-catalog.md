@@ -41,6 +41,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
 | `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
+| `@deepseek-ai/dsh-tool-computer-use` | `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2811,3 +2812,451 @@ Wait until text appears or a JS expression is truthy on an attached tab.
 Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
 browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`.
+
+<a id="deepseek-aidsh-tool-computer-use"></a>
+
+## `@deepseek-ai/dsh-tool-computer-use`
+
+### `computer_apps`
+
+List running GUI applications and their windows, including whether this agent currently holds a grant.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_click`
+
+Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Epoch-scoped snapshot ref."
+    },
+    "x": {
+      "type": "number",
+      "description": "X coordinate when not using ref."
+    },
+    "y": {
+      "type": "number",
+      "description": "Y coordinate when not using ref."
+    },
+    "space": {
+      "type": "string",
+      "description": "screenshot (default) or screen."
+    },
+    "button": {
+      "type": "string",
+      "description": "left, right, or middle."
+    },
+    "count": {
+      "type": "number",
+      "description": "Click count. Defaults to 1."
+    }
+  },
+  "required": [
+    "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_clipboard`
+
+Read or write the system clipboard. Writes require a granted app.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "read or write."
+    },
+    "text": {
+      "type": "string",
+      "description": "Clipboard replacement when action is write."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_drag`
+
+Drag from one point to another in a window.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "space": {
+      "type": "string",
+      "description": "screenshot (default) or screen."
+    }
+  },
+  "required": [
+    "windowId",
+    "from",
+    "to"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_focus`
+
+Bring a window to the front.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    }
+  },
+  "required": [
+    "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_launch`
+
+Launch a GUI application by name, bundle id, or executable and return its windows.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "app": {
+      "type": "string",
+      "description": "Application name, bundle id, or executable."
+    }
+  },
+  "required": [
+    "app"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_mouse_move`
+
+Move the pointer to coordinates in a window without clicking.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "x": {
+      "type": "number",
+      "description": "X coordinate."
+    },
+    "y": {
+      "type": "number",
+      "description": "Y coordinate."
+    },
+    "space": {
+      "type": "string",
+      "description": "screenshot (default) or screen."
+    }
+  },
+  "required": [
+    "windowId",
+    "x",
+    "y"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_press_key`
+
+Press a key in a window, with optional modifiers and repeat.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "key": {
+      "type": "string",
+      "description": "Key name, for example Enter or a."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "repeat": {
+      "type": "number",
+      "description": "How many times to press. Defaults to 1."
+    }
+  },
+  "required": [
+    "windowId",
+    "key"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_screenshot`
+
+Capture a window or display as an image attachment. Requires an image-capable model route; prefer computer_snapshot on text-only routes.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window to capture; omit for the full display."
+    },
+    "region": {
+      "type": "object",
+      "description": "Optional crop in logical screen coordinates (Anthropic zoom).",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ]
+    }
+  }
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_scroll`
+
+Scroll at a snapshot ref or coordinates.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref whose center is the scroll origin."
+    },
+    "x": {
+      "type": "number",
+      "description": "X coordinate when not using ref."
+    },
+    "y": {
+      "type": "number",
+      "description": "Y coordinate when not using ref."
+    },
+    "space": {
+      "type": "string",
+      "description": "screenshot (default) or screen."
+    },
+    "direction": {
+      "type": "string",
+      "description": "up, down, left, or right."
+    },
+    "amount": {
+      "type": "number",
+      "description": "Scroll amount in provider units."
+    }
+  },
+  "required": [
+    "windowId",
+    "direction",
+    "amount"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_snapshot`
+
+Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "query": {
+      "type": "string",
+      "description": "Optional role or name substring filter."
+    },
+    "maxDepth": {
+      "type": "number",
+      "description": "Unused depth hint reserved for providers; the node cap is snapshotMaxNodes."
+    }
+  },
+  "required": [
+    "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_type`
+
+Type text into a window. A ref with setValue support uses the accessibility action; otherwise keystrokes are synthesized.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "text": {
+      "type": "string",
+      "description": "Literal text to type."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref of the target field."
+    },
+    "submit": {
+      "type": "boolean",
+      "description": "Press Enter after typing."
+    }
+  },
+  "required": [
+    "windowId",
+    "text"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_wait_for`
+
+Poll a window accessibility tree until text or the title matches, or the timeout elapses.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "text": {
+      "type": "string",
+      "description": "Substring to find in the snapshot outline."
+    },
+    "title": {
+      "type": "string",
+      "description": "Substring to find in the window title."
+    },
+    "timeoutMs": {
+      "type": "number",
+      "description": "How long to poll. Defaults to the tool timeout."
+    }
+  },
+  "required": [
+    "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`.

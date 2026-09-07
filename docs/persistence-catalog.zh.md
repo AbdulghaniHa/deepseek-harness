@@ -403,6 +403,29 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/compaction/compaction/src/types.ts:34`](../packages/compaction/compaction/src/types.ts)
 
+### `computer/*`
+
+<a id="computerapp-grant--log-only"></a>
+
+#### `computer/app-grant` — log-only
+
+```ts persistence-catalog
+/**
+ * Session-scoped app grant recorded for UI replay. Log-only, whole-value
+ * replace: the last `computer/app-grant` for an appId wins.
+ * @param appId - provider app id the grant covers.
+ * @param appName - display name at grant time.
+ * @param scope - recorded grant duration; session grants are the only ones logged.
+ */
+'computer/app-grant': {
+  appId: string
+  appName: string
+  scope: 'once' | 'session'
+}
+```
+
+来源：[`packages/computer-use/tool-computer-use/src/index.ts:37`](../packages/computer-use/tool-computer-use/src/index.ts)
+
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>

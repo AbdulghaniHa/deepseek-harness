@@ -44,6 +44,11 @@ switch (invocation.mode) {
     process.exit(await runBrowser(invocation.action, invocation.browser, invocation.extensionId))
     break
   }
+  case 'computer': {
+    const { runComputer } = await import('./computer.ts')
+    process.exit(await runComputer(invocation.action, invocation.request))
+    break
+  }
   case 'dump-config': {
     const { runDumpConfig } = await import('./dump-config.ts')
     runDumpConfig(invocation.profile, invocation.defaultOnly, invocation.patches)

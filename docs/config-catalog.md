@@ -500,6 +500,45 @@ export interface ToolResultPruneConfig {
 
 Source: [`packages/compaction/compaction-tool-result-pruner/src/types.ts:5`](../packages/compaction/compaction-tool-result-pruner/src/types.ts)
 
+<a id="deepseek-aidsh-computer-use"></a>
+
+## `@deepseek-ai/dsh-computer-use`
+
+```ts config-catalog
+/**
+ * Config for the computer-use seam. `provider` pins which backend wins; it is
+ * optional (a single registered usable provider auto-selects). Operational
+ * overrides such as environment variables must feed this same field rather
+ * than introduce a hidden priority chain.
+ */
+export interface ComputerRuntimeConfig {
+  /** Explicit provider id. Omitted = auto-select when exactly one usable. */
+  readonly provider?: string
+  /** Extra deny tokens (bundle ids, names, or executable basenames) beyond the fixed terminal list. */
+  readonly deniedApps?: string[]
+}
+```
+
+Source: [`packages/computer-use/computer-use/src/index.ts:85`](../packages/computer-use/computer-use/src/index.ts)
+
+<a id="deepseek-aidsh-computer-use-local"></a>
+
+## `@deepseek-ai/dsh-computer-use-local`
+
+Requires: `computer` · `subprocess`
+
+```ts config-catalog
+/** Plugin config: helper RPC timeout and terminate grace. */
+export interface Config {
+  /** Per-RPC timeout in milliseconds. */
+  requestTimeoutMs?: number
+  /** SIGTERM-to-SIGKILL grace for the helper process tree, in milliseconds. */
+  graceMs?: number
+}
+```
+
+Source: [`packages/computer-use/computer-use-local/src/index.ts:42`](../packages/computer-use/computer-use-local/src/index.ts)
+
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
 ## `@deepseek-ai/dsh-cordis-host-runner`
@@ -2544,7 +2583,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:238`](../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:239`](../packages/core/system-prompt/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -2711,6 +2750,41 @@ export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
 ```
 
 Source: [`packages/browser/tool-browser/src/index.ts:47`](../packages/browser/tool-browser/src/index.ts)
+
+<a id="deepseek-aidsh-tool-computer-use"></a>
+
+## `@deepseek-ai/dsh-tool-computer-use`
+
+Requires: `tools` · `computer` · `systemPrompt`
+
+```ts config-catalog
+/** Plugin config: enablement, approval, grants, and capture caps. */
+export interface Config {
+  /** Register the `computer_*` tools. Defaults to true. */
+  enabled?: boolean
+  /** When to ask before a computer side effect. */
+  approval?: ComputerApprovalMode
+  /** Grant duration offered on first use of an app. */
+  grantScope?: 'once' | 'session'
+  /** Upper bound on accessibility nodes in one snapshot. */
+  snapshotMaxNodes?: number
+  /** Logical max width used to scale screenshot coordinates. */
+  screenshotMaxWidth?: number
+  /** Upper bound on a screenshot's encoded byte size. */
+  screenshotMaxBytes?: number
+  /** Cooperative timeout budget (ms) for computer tools. */
+  timeoutMs?: number
+  /** Extra deny tokens forwarded to `ctx.computer` are owned by that service. */
+  deniedApps?: string[]
+  /** When false, `computer_screenshot` refuses. */
+  allowScreenCapture?: boolean
+}
+
+/** When the consumer asks before a computer side effect. */
+export type ComputerApprovalMode = 'always' | 'apps' | 'never'
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts:64`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
