@@ -2075,6 +2075,11 @@
       "doc": "packages/client/ui-conversation/README.md",
       "symbol": "ComposerChainProps",
       "source": "packages/client/ui-conversation/src/client/contract/slots.ts"
+    },
+    {
+      "doc": "docs/subsystems/browser.md",
+      "symbol": "BrowserPreview",
+      "source": "packages/browser/browser/src/client.ts"
     }
   ]
 }

@@ -28,7 +28,6 @@ import {
   typeText,
 } from '@deepseek-ai/dsh-tool-browser'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 const signal = new AbortController().signal
 
@@ -46,6 +45,13 @@ function tab(id: string, overrides: Partial<BrowserTab> = {}): BrowserTab {
     grouped: false,
     ...overrides,
   }
+}
+
+function textOf(result: { content: readonly unknown[] }): string {
+  const block = result.content[0]
+  return typeof block === 'object' && block !== null && 'text' in block && typeof block.text === 'string'
+    ? block.text
+    : ''
 }
 
 function axTree() {
@@ -71,15 +77,24 @@ function makeProvider(cdpImpl?: (method: string, params?: Readonly<Record<string
 } {
   const events = new Set<(event: BrowserCdpEvent) => void>()
   const first = tab('1')
+  const tabs: BrowserTab[] = [first]
   return {
     id: 'fake',
     available: () => true,
     capabilities: () => ['tabs', 'cdp', 'history', 'bookmarks', 'readingList', 'downloads'],
-    listTabs: () => Promise.resolve([first]),
-    openTab: request => Promise.resolve(tab('opened', { url: request.url, title: 'Opened', grouped: request.group === true })),
+    listTabs: () => Promise.resolve(tabs.slice()),
+    openTab: (request) => {
+      const opened = tab('opened', { url: request.url, title: 'Opened', grouped: request.group === true, active: false })
+      tabs.push(opened)
+      return Promise.resolve(opened)
+    },
     attach: () => Promise.resolve(),
     detach: () => Promise.resolve(),
-    closeTab: () => Promise.resolve(),
+    closeTab: (tabId) => {
+      const index = tabs.findIndex(item => item.id === tabId)
+      if (index >= 0) tabs.splice(index, 1)
+      return Promise.resolve()
+    },
     cdp: request => Promise.resolve(cdpImpl?.(request.method, request.params) ?? {}),
     onCdpEvent: (listener) => {
       events.add(listener)
@@ -343,18 +358,56 @@ describe('tool-browser plugin', () => {
     })
     const tabs = await call('browser_tabs', {})
     expect(tabs.isError).toBe(false)
-    expect(String(tabs.content[0] && 'text' in tabs.content[0] ? tabs.content[0].text : '')).toContain('[1]')
+    expect(textOf(tabs)).toContain('[1]')
     const opened = await call('browser_open', { url: 'https://example.com/new' })
+    expect(opened.isError).toBe(false)
     expect(opened.value).toMatchObject({ url: 'https://example.com/new' })
+    expect(typeof (opened.value as { previewError: string }).previewError).toBe('string')
+    expect(opened.value).not.toHaveProperty('screenshot')
+    expect(textOf(opened)).toContain('Opened')
+    expect(textOf(opened)).not.toMatch(/previewError|AAAA/)
     expect(ctx.tools.get('browser_open')?.presentCall?.({ url: 'https://example.com/new' }))
       .toMatchObject({ title: 'Open https://example.com/new' })
     await ctx.browser.attach(owner, BrowserTabId('1'))
     const attached = await call('browser_attach', { tabId: '1' })
     expect(attached.value).toEqual({ tabId: '1', attached: true })
     const snapshot = await call('browser_snapshot', { tabId: '1' })
-    expect(String(snapshot.content[0] && 'text' in snapshot.content[0] ? snapshot.content[0].text : '')).toContain('untrusted')
+    expect(textOf(snapshot)).toContain('untrusted')
     const closed = await call('browser_close', { tabId: '1' })
     expect(closed.value).toEqual({ tabId: '1', closed: true })
+  })
+
+  it('attaches preview bytes on open without putting them in Native render text', async () => {
+    const { call } = await mount({
+      cdp: method => method === 'Page.captureScreenshot' ? { data: 'AAAA' } : {},
+    })
+    const opened = await call('browser_open', { url: 'https://example.com/new' })
+    expect(opened.isError).toBe(false)
+    expect(opened.value).toMatchObject({ screenshot: 'AAAA', url: 'https://example.com/new' })
+    expect(textOf(opened)).not.toContain('AAAA')
+  })
+
+  it('names a freshly opened tab once Chrome commits its URL', async () => {
+    const base = makeProvider(method => method === 'Page.captureScreenshot' ? { data: 'AAAA' } : {})
+    const opened = await mount({
+      provider: {
+        ...base,
+        openTab: () => Promise.resolve(tab('opened', { url: '', title: '', active: false })),
+        listTabs: () => Promise.resolve([tab('opened', { url: 'https://example.com/', title: 'Example Domain' })]),
+      },
+    })
+    const result = await opened.call('browser_open', { url: 'https://example.com' })
+    expect(result.value).toMatchObject({ url: 'https://example.com/', title: 'Example Domain', screenshot: 'AAAA' })
+  })
+
+  it('records a previewError when capture rejects a non-Error', async () => {
+    const { call } = await mount({
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- previewError must stringify a non-Error rejection
+      cdp: () => Promise.reject('fail'),
+    })
+    const opened = await call('browser_open', { url: 'https://example.com/new' })
+    expect(opened.isError).toBe(false)
+    expect(opened.value).toMatchObject({ previewError: 'fail' })
   })
 
   it('navigates, reads text, and captures screenshots', async () => {
@@ -644,11 +697,11 @@ describe('tool-browser plugin', () => {
         items: [{ title: 'T', url: 'https://u', hasBeenRead: true, filename: 'f', state: 'complete' }],
         truncated: true, bytes: 2, mimeType: 'image/png',
         result: null, text: '', url: 'u', title: 't', tabId: '1',
-      } as JsonValue)
+      })
       tool?.output.render(args, {
         tabs: [], messages: [], items: [{ title: 'Folder' }], truncated: false, bytes: 2, mimeType: 'image/png',
         result: 1, value: 1, text: 'x', url: 'u', title: 't', tabId: '1',
-      } as JsonValue)
+      })
     }
     ctx.tools.get('browser_wait_for')?.presentCall?.({ tabId: '1', expression: '1' })
     ctx.tools.get('browser_wait_for')?.presentCall?.({ tabId: '1' })
@@ -735,7 +788,7 @@ describe('tool-browser plugin', () => {
       },
     })
     const listed = await emptyTabs.call('browser_tabs', {})
-    expect(String(listed.content[0] && 'text' in listed.content[0] ? listed.content[0].text : '')).toBe('(no tabs)')
+    expect(textOf(listed)).toBe('(no tabs)')
   })
 })
 

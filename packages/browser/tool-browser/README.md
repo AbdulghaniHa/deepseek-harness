@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 With `dsh-tool-browser`, the model can drive the user's real Chrome through `browser_*` tools backed by `ctx.browser`. Choose it when the model should use existing tabs, cookies, and logins; prefer `web_fetch` for a public page that does not need a logged-in session. Tools stay visible even when the selected provider is disconnected: execution then fails with a structured `BrowserError`. Side-effecting tools ask `ctx.approval` per the `approval` config. `dsh-base` mounts the row with `enabled: false` until a product turns the tools on after `dsh browser install`.
 
+Opening, navigating, and snapshot-returning interactions include a bounded viewport screenshot in result metadata for the chat preview. Preview failures preserve the completed action and record a preview error. Preview images do not enter the Native model response; canonical PTC values can include the image data. Browser clicks use target-specific CDP input without bringing the tab forward. An open reports the page identity from its own capture when Chrome has not committed the tab's URL yet. The browser service owns preview limits; `screenshotMaxBytes` applies to the explicit screenshot tool.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)

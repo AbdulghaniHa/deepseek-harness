@@ -5,12 +5,13 @@
  * @module @deepseek-ai/dsh-browser/types
  */
 
+import type { BrowserTabId } from './client.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 /** Opaque Chrome-tab identity minted by a provider and fenced by the seam. */
-export type BrowserTabId = Branded<'BrowserTabId'>
+export type { BrowserTabId, BrowserPreview } from './client.ts'
 
 /** Opaque attachment identity minted by {@link BrowserRuntime} for one owner + tab. */
 export type BrowserAttachmentId = Branded<'BrowserAttachmentId'>
@@ -43,6 +44,8 @@ export interface BrowserOpenTabRequest {
   readonly url: string
   /** When true, the provider places the tab in the agent tab group. */
   readonly group?: boolean
+  /** Reuse this agent-created tab's group when it still exists. */
+  readonly groupWithTabId?: BrowserTabId
 }
 
 /** One CDP command against an attached tab. */
@@ -99,7 +102,10 @@ export interface BrowserProvider {
   /** Facets this backend can serve right now. */
   capabilities(): readonly BrowserCapability[]
   listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>
+  /** Open without changing the active tab or focused window. */
   openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>
+  /** Activate the selected tab and focus its window only on explicit user request. */
+  revealTab?(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>

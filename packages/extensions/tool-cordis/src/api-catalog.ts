@@ -639,6 +639,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the CDP result value.',
       },
       {
+        signature: '@Remote(\'preview\') async preview(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<BrowserPreview>',
+        description: 'Capture an attached tab for a chat preview without activating Chrome.',
+        parameters: [{ name: 'agent', description: 'exact live Agent whose attachment authorizes the capture.' }, { name: 'tabId', description: 'attached tab to preview.' }, { name: 'signal', description: 'cancellation forwarded to Chrome.' }],
+        returns: 'bounded PNG data and capture time; oversized captures throw.',
+      },
+      {
+        signature: '@Remote(\'reveal\') async reveal(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<void>',
+        description: 'Reveal an attached tab in Chrome after an explicit user action.',
+        parameters: [{ name: 'agent', description: 'exact live Agent whose attachment authorizes the reveal.' }, { name: 'tabId', description: 'attached tab to activate.' }, { name: 'signal', description: 'cancellation forwarded to the provider.' }],
+      },
+      {
         signature: 'onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void',
         description: 'Subscribe to CDP events from the selected provider.',
         parameters: [{ name: 'listener', description: 'called with each forwarded event.' }],
@@ -3977,11 +3988,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'BrowserOpenTabRequest',
-    declaration: 'export interface BrowserOpenTabRequest {\n    readonly url: string;\n    readonly group?: boolean;\n}',
+    declaration: 'export interface BrowserOpenTabRequest {\n    readonly url: string;\n    readonly group?: boolean;\n    readonly groupWithTabId?: BrowserTabId;\n}',
+  },
+  {
+    name: 'BrowserPreview',
+    declaration: 'export interface BrowserPreview {\n    readonly tabId: BrowserTabId;\n    readonly url: string;\n    readonly title: string;\n    readonly screenshot: string;\n    readonly capturedAt: number;\n    readonly refreshIntervalMs: number;\n}',
   },
   {
     name: 'BrowserProvider',
-    declaration: 'export interface BrowserProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly BrowserCapability[];\n    listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>;\n    openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>;\n    attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    cdp(request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>;\n    onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void;\n    historySearch?(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>;\n    listBookmarks?(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>;\n    createBookmark?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserBookmarkItem>;\n    listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>;\n    addReadingList?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserReadingListItem>;\n    listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>;\n}',
+    declaration: 'export interface BrowserProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly BrowserCapability[];\n    listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>;\n    openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>;\n    revealTab?(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    cdp(request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>;\n    onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void;\n    historySearch?(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>;\n    listBookmarks?(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>;\n    createBookmark?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserBookmarkItem>;\n    listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>;\n    addReadingList?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserReadingListItem>;\n    listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>;\n}',
   },
   {
     name: 'BrowserReadingListItem',

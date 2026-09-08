@@ -7,8 +7,10 @@
  * @module @deepseek-ai/dsh-browser
  */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
+import type { BrowserPreview, BrowserTabId as BrowserTabIdBrand } from './client.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type {
@@ -24,10 +26,10 @@ import type {
   BrowserProvider,
   BrowserReadingListItem,
   BrowserTab,
-  BrowserTabId as BrowserTabIdBrand,
 } from './types.ts'
 import { BrowserError } from './types.ts'
 
+export type { BrowserPreview } from './client.ts'
 export {
   BrowserError,
 } from './types.ts'
@@ -72,6 +74,10 @@ interface Selection {
 export interface BrowserRuntimeConfig {
   /** Explicit provider id. Omitted = auto-select when exactly one usable. */
   readonly provider?: string
+  /** Maximum decoded PNG bytes returned by the chat preview. */
+  readonly previewMaxBytes?: number
+  /** Delay between visible chat preview refreshes, in milliseconds. */
+  readonly previewIntervalMs?: number
 }
 
 interface AttachmentRecord extends BrowserAttachment {
@@ -108,7 +114,7 @@ export function BrowserAttachmentId(value: string): BrowserAttachmentId {
  * - No id configured, multiple usable providers → `BROWSER_PROVIDER_AMBIGUOUS`.
  * - No id configured, no usable provider → `BROWSER_PROVIDER_UNAVAILABLE`.
  */
-export class BrowserRuntime extends Service {
+export class BrowserRuntime extends TypertRemoteService {
   /**
    * Provider selection config. Operational env overrides feed the SAME field:
    * `$DSH_BROWSER_PROVIDER` is equivalent to `provider` and is NOT a hidden
@@ -116,11 +122,18 @@ export class BrowserRuntime extends Service {
    */
   static Config: z<BrowserRuntimeConfig> = z.object({
     provider: z.string(),
+    previewMaxBytes: z.number().default(1_000_000),
+    previewIntervalMs: z.number().default(2_000),
   })
 
   private providers = new Map<string, BrowserProvider>()
   private attachments = new Map<BrowserAttachmentId, AttachmentRecord>()
   private readonly providerId: string | undefined
+  private readonly previewMaxBytes: number
+  private readonly previewIntervalMs: number
+  private readonly groupTabs = new WeakMap<Agent, Set<BrowserTabId>>()
+  private readonly openings = new WeakMap<Agent, Promise<unknown>>()
+  private readonly captures = new Map<BrowserTabId, Promise<unknown>>()
   private nextAttachment = 0
   private readonly eventListeners = new Set<(event: BrowserCdpEvent) => void>()
   private providerEventDisposers = new Map<string, () => void>()
@@ -128,7 +141,12 @@ export class BrowserRuntime extends Service {
   constructor(ctx: Context, config: BrowserRuntimeConfig = {}) {
     super(ctx, 'browser')
     this.providerId = config.provider ?? process.env.DSH_BROWSER_PROVIDER
-    ctx.effect(() => () => this.detachAll(), 'browser teardown')
+    this.previewMaxBytes = config.previewMaxBytes ?? 1_000_000
+    this.previewIntervalMs = config.previewIntervalMs ?? 2_000
+    for (const [field, value] of [['previewMaxBytes', this.previewMaxBytes], ['previewIntervalMs', this.previewIntervalMs]] as const) {
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`browser: ${field} must be a positive integer`)
+    }
+    ctx.effect(() => () => { this.detachAll() }, 'browser teardown')
   }
 
   /**
@@ -144,7 +162,7 @@ export class BrowserRuntime extends Service {
     }
     const dispose = this.ctx.effect(() => {
       this.providers.set(provider.id, provider)
-      this.providerEventDisposers.set(provider.id, provider.onCdpEvent(event => this.forwardCdpEvent(event)))
+      this.providerEventDisposers.set(provider.id, provider.onCdpEvent((event) => { this.forwardCdpEvent(event) }))
       return () => {
         this.providerEventDisposers.get(provider.id)?.()
         this.providerEventDisposers.delete(provider.id)
@@ -174,10 +192,31 @@ export class BrowserRuntime extends Service {
     tab: BrowserTab
     attachmentId: BrowserAttachmentId
   }> {
-    const provider = this.resolveProvider()
-    const tab = await provider.openTab(request, signal)
-    const attachmentId = await this.attach(owner, tab.id, signal)
-    return { tab, attachmentId }
+    const previous = this.openings.get(owner) ?? Promise.resolve()
+    const opening = previous.then(async () => {
+      signal?.throwIfAborted()
+      const provider = this.resolveProvider()
+      const ownedTabs = this.groupTabs.get(owner)
+      const groupWithTabId = request.group === true && ownedTabs !== undefined
+        ? (await provider.listTabs(signal)).find(tab => ownedTabs.has(tab.id))?.id
+        : undefined
+      const tab = await provider.openTab({ ...request,
+        ...groupWithTabId === undefined ? {} : { groupWithTabId },
+      }, signal)
+      if (request.group === true) {
+        const tabs = ownedTabs ?? new Set<BrowserTabId>()
+        tabs.add(tab.id)
+        this.groupTabs.set(owner, tabs)
+      }
+      const attachmentId = await this.attach(owner, tab.id, signal)
+      return { tab, attachmentId }
+    })
+    const settled = opening.then(() => undefined, () => undefined)
+    this.openings.set(owner, settled)
+    void settled.then(() => {
+      if (this.openings.get(owner) === settled) this.openings.delete(owner)
+    })
+    return opening
   }
 
   /**
@@ -223,6 +262,7 @@ export class BrowserRuntime extends Service {
   async closeTab(owner: Agent, tabId: BrowserTabId, signal?: AbortSignal): Promise<void> {
     this.requireTabOwner(owner, tabId)
     await this.resolveProvider().closeTab(tabId, signal)
+    this.groupTabs.get(owner)?.delete(tabId)
     for (const [id, record] of this.attachments) {
       if (record.tabId === tabId) this.attachments.delete(id)
     }
@@ -238,6 +278,69 @@ export class BrowserRuntime extends Service {
   async cdp(owner: Agent, request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown> {
     this.requireTabOwner(owner, request.tabId)
     return this.resolveProvider().cdp(request, signal)
+  }
+
+  /**
+   * Capture an attached tab for a chat preview without activating Chrome.
+   * `url` and `title` describe the tab after the capture, so a tab that had not
+   * committed its URL yet reports the page it landed on.
+   * @param agent - exact live Agent whose attachment authorizes the capture.
+   * @param tabId - attached tab to preview.
+   * @param signal - cancellation forwarded to Chrome.
+   * @returns bounded PNG data and capture time; oversized captures throw.
+   */
+  @Remote('preview')
+  async preview(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<BrowserPreview> {
+    this.requireTabOwner(agent, tabId)
+    const previous = this.captures.get(tabId) ?? Promise.resolve()
+    const capture = previous.then(async () => {
+      signal?.throwIfAborted()
+      this.requireTabOwner(agent, tabId)
+      const provider = this.resolveProvider()
+      let tab = (await provider.listTabs(signal)).find(tab => tab.id === tabId)
+      if (tab === undefined) throw new BrowserError('preview tab is closed', 'BROWSER_TAB_GONE')
+      const result = await provider.cdp({ tabId, method: 'Page.captureScreenshot', params: {
+        format: 'png', fromSurface: true, captureBeyondViewport: false,
+      } }, signal) as { data?: unknown }
+      if (typeof result.data !== 'string' || result.data.length === 0) {
+        throw new BrowserError('Chrome returned no valid preview image', 'BROWSER_PREVIEW_UNAVAILABLE')
+      }
+      if (Buffer.byteLength(result.data, 'base64') > this.previewMaxBytes) {
+        throw new BrowserError('preview exceeds previewMaxBytes', 'BROWSER_PREVIEW_TOO_LARGE')
+      }
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(result.data) || result.data.length % 4 !== 0) {
+        throw new BrowserError('Chrome returned no valid preview image', 'BROWSER_PREVIEW_UNAVAILABLE')
+      }
+      signal?.throwIfAborted()
+      this.requireTabOwner(agent, tabId)
+      // A tab opened moments ago has no committed URL yet; re-read identity so
+      // the preview names the page instead of reporting an empty URL.
+      if (tab.url === '') {
+        tab = (await provider.listTabs(signal)).find(candidate => candidate.id === tabId) ?? tab
+      }
+      return { tabId, url: tab.url, title: tab.title, screenshot: result.data,
+        capturedAt: Date.now(), refreshIntervalMs: this.previewIntervalMs }
+    })
+    const settled = capture.then(() => undefined, () => undefined)
+    this.captures.set(tabId, settled)
+    void settled.then(() => {
+      if (this.captures.get(tabId) === settled) this.captures.delete(tabId)
+    })
+    return capture
+  }
+
+  /**
+   * Reveal an attached tab in Chrome after an explicit user action.
+   * @param agent - exact live Agent whose attachment authorizes the reveal.
+   * @param tabId - attached tab to activate.
+   * @param signal - cancellation forwarded to the provider.
+   */
+  @Remote('reveal')
+  async reveal(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<void> {
+    this.requireTabOwner(agent, tabId)
+    const provider = this.resolveProvider()
+    if (provider.revealTab === undefined) throw new BrowserError('provider cannot reveal tabs', 'BROWSER_FACET_UNAVAILABLE')
+    await provider.revealTab(tabId, signal)
   }
 
   /**

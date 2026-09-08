@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 `dsh-client-ui-tool` is the client Tool presentation plugin of the dsh web client: it renders every tool call in the conversation. `ui-conversation` dispatches each ordered `tool-call` Conversation Node through the matching key of `conversation.chat.node`; this package renders its root and Code Dispatch children, then dispatches every atomic call through the keyed `tool.call.toolview` slot. Unregistered Tool names use the generic card. Business UI packages register only their wire Tool names and atomic views — they do not pair Session events, rebuild the transcript, or own root/subcall topology, because the Runtime remains authoritative for call/result pairing, lifecycle, and recursive `subCalls` projection.
 
+Browser rows display saved viewport previews with capture times. Expand enlarges the image within chat; Refresh requests the attached tab’s current image; Live preview repeats captures until paused, disconnected, or unmounted. Show in Chrome explicitly activates the controlled tab. Historical images remain visible when their tab is unavailable, and failed refreshes retain the preceding image.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -43,7 +45,7 @@ The owner payload is `ToolCallOwnerProps`: `callId`, `toolName`, the frozen `blo
 
 ### Built-in views
 
-This package owns the generic fallback and the built-in shell/pwsh, read, read_image, write/edit, running `str_replace_editor` `create`/`str_replace`, grep/glob, web, todo, question, and Code Dispatch presentations. Structured cards derive directly from first-party raw event fields; Host `presentCall` and `presentResult` values never enter the Client. Foreground one-shot shell results use terminal cards. Settled persistent-shell results use the expandable generic input/output card because reset and partial-output diagnostics do not always describe one process exit status; background acknowledgements remain collapsed. A successful question row pairs call questions with result answers by their stable ids and shows readable question/answer lines when expanded. A cancelled or interrupted row shows its verdict and original questions without inventing answers. Unsupported, malformed, or ambiguous inputs fall back to flattened Tool input/result text. `ui-skill` demonstrates a business-owned registration for `skill`.
+This package owns the generic fallback and the built-in shell/pwsh, read, read_image, write/edit, running `str_replace_editor` `create`/`str_replace`, grep/glob, web, browser, todo, question, and Code Dispatch presentations. Structured cards derive directly from first-party raw event fields; Host `presentCall` and `presentResult` values never enter the Client. Foreground one-shot shell results use terminal cards. Settled persistent-shell results use the expandable generic input/output card because reset and partial-output diagnostics do not always describe one process exit status; background acknowledgements remain collapsed. A successful question row pairs call questions with result answers by their stable ids and shows readable question/answer lines when expanded. A cancelled or interrupted row shows its verdict and original questions without inventing answers. Unsupported, malformed, or ambiguous inputs fall back to flattened Tool input/result text. `ui-skill` demonstrates a business-owned registration for `skill`.
 
 -----
 

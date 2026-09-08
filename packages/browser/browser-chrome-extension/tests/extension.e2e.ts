@@ -1,81 +1,63 @@
-/**
- * Self-skipping Chromium e2e for the unpacked MV3 extension. Skips unless
- * `DSH_BROWSER_E2E=1` and a Chromium-family binary is on the machine. Does not
- * add Playwright: the probe launches Chromium with `--load-extension` and
- * asserts the process starts against a local fixture page.
- */
-import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+/** Real extension commands in an isolated Chromium profile; opt in with DSH_BROWSER_E2E=1. */
+import { cp, mkdtemp, appendFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { chromium } from 'playwright'
+import { describe, expect, it } from 'vitest'
 
-const packageRoot = fileURLToPath(new URL('..', import.meta.url))
-const extensionDir = join(packageRoot, 'extension')
+/** Test-only access to the copied service worker's shipped dispatcher. */
+type WorkerDispatch = { dispatchForTest: (method: string, params: Record<string, unknown>) => Promise<unknown> }
 
-function findChromium(): string | undefined {
-  const env = process.env.DSH_BROWSER_CHROMIUM
-  if (env !== undefined && env.length > 0 && existsSync(env)) return env
-  const named = ['chromium', 'google-chrome', 'chromium-browser', 'chrome']
-  for (const candidate of [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    ...named,
-  ]) {
-    if (candidate.startsWith('/') && existsSync(candidate)) return candidate
-    const probe = spawnSync(process.platform === 'win32' ? 'where' : 'which', [candidate], {
-      encoding: 'utf8',
-      timeout: 5_000,
-    })
-    const line = probe.stdout.trim().split('\n')[0]
-    if (probe.status === 0 && line !== undefined && line.length > 0) return line
-  }
-  return undefined
-}
-
-const enabled = process.env.DSH_BROWSER_E2E === '1'
-const chromium = enabled ? findChromium() : undefined
-const skip = !enabled || chromium === undefined
-
-let userData: string | undefined
-
-afterEach(async () => {
-  if (userData !== undefined) await rm(userData, { recursive: true, force: true })
-  userData = undefined
-})
-
-describe.skipIf(skip)('chrome extension e2e', () => {
-  it('starts Chromium with the unpacked extension and a local fixture page', async () => {
-    expect(existsSync(join(extensionDir, 'manifest.json'))).toBe(true)
-    userData = await mkdtemp(join(tmpdir(), 'dsh-browser-e2e-'))
-    const page = join(userData, 'fixture.html')
-    await writeFile(page, '<!doctype html><title>Fixture</title><button id="go">Go</button>\n')
-    const child = spawn(chromium as string, [
-      `--user-data-dir=${userData}`,
-      `--load-extension=${extensionDir}`,
-      '--disable-extensions-except=' + extensionDir,
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--headless=new',
-      `file://${page}`,
-    ], { stdio: 'ignore' })
+describe.skipIf(process.env.DSH_BROWSER_E2E !== '1')('background Chrome extension', () => {
+  it('clicks, types, scrolls, and captures an inactive grouped tab while user input stays in another tab', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-browser-e2e-'))
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { resolve() }, 2_000)
-        child.once('exit', (code, signal) => {
-          clearTimeout(timer)
-          reject(new Error(`Chromium exited early: code=${code} signal=${signal}`))
-        })
-        child.once('error', (error) => {
-          clearTimeout(timer)
-          reject(error)
-        })
+      const extension = join(root, 'extension')
+      await cp(new URL('../extension', import.meta.url), extension, { recursive: true })
+      await appendFile(join(extension, 'background.js'), '\nglobalThis.dispatchForTest = dispatch\n')
+      const context = await chromium.launchPersistentContext(join(root, 'profile'), {
+        channel: 'chromium', headless: process.env.DSH_BROWSER_HEADED !== '1',
+        ...(process.env.DSH_BROWSER_CHROMIUM === undefined ? {} : { executablePath: process.env.DSH_BROWSER_CHROMIUM }),
+        args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
       })
+      try {
+        const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker')
+        const dispatch = (method: string, params: Record<string, unknown> = {}) => worker.evaluate(
+          ({ method, params }) => (globalThis as unknown as WorkerDispatch).dispatchForTest(method, params), { method, params },
+        )
+        const user = context.pages()[0] ?? await context.newPage()
+        await user.setContent('<input id="user" autofocus>')
+        await user.locator('input').focus()
+        await user.bringToFront()
+        const before = await worker.evaluate(async () => {
+          const chrome = (globalThis as unknown as { chrome: { tabs: { query: (q: object) => Promise<{ id: number }[]> } } }).chrome
+          return (await chrome.tabs.query({ active: true }))[0]?.id
+        })
+        const opened = await dispatch('tabs.create', { url: 'about:blank', group: true }) as { id: string; active: boolean }
+        expect(opened.active).toBe(false)
+        await dispatch('debugger.attach', { tabId: opened.id })
+        const cdp = (method: string, params: Record<string, unknown> = {}) => dispatch('debugger.sendCommand', { tabId: opened.id, method, params })
+        const html = '<input id="agent"><button>Click</button><div style="height:3000px"></div>'
+        await cdp('Runtime.evaluate', { expression: `document.body.innerHTML = ${JSON.stringify(html)}; document.querySelector('button').onclick = () => { document.querySelector('button').textContent = 'Clicked' }` })
+        const point = await cdp('Runtime.evaluate', { expression: '({x:document.querySelector("button").getBoundingClientRect().x+10,y:20})', returnByValue: true }) as { result: { value: { x: number; y: number } } }
+        for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, ...point.result.value, button: 'left', clickCount: 1 })
+        await cdp('Runtime.evaluate', { expression: 'document.querySelector("input").focus()' })
+        await cdp('Input.insertText', { text: 'agent text' })
+        await user.keyboard.type('user text')
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 100, y: 100, deltaX: 0, deltaY: 500 })
+        const shot = await cdp('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false }) as { data: string }
+        expect(Buffer.from(shot.data, 'base64').subarray(1, 4).toString()).toBe('PNG')
+        const value = await cdp('Runtime.evaluate', { expression: '({value:document.querySelector("input").value,button:document.querySelector("button").textContent})', returnByValue: true }) as { result: { value: unknown } }
+        expect(value.result.value).toEqual({ value: 'agent text', button: 'Clicked' })
+        expect(await user.locator('input').inputValue()).toBe('user text')
+        const tabs = await dispatch('tabs.list') as { id: string; active: boolean }[]
+        expect(tabs.find(tab => tab.active)?.id).toBe(String(before))
+        await dispatch('tabs.close', { tabId: opened.id })
+      } finally {
+        await context.close()
+      }
     } finally {
-      child.kill('SIGKILL')
+      await rm(root, { recursive: true, force: true })
     }
-  }, 15_000)
+  })
 })

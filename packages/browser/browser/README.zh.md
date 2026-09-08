@@ -11,6 +11,8 @@ kind: "package-reference"
 
 任何插件或工具都可以通过 `dsh-browser`（`ctx.browser`）列出标签页、附加并发送 CDP，而无需绑定 Chrome Native Messaging。提供方作为后端插入，服务挑选一个可用提供方，因此调用方不必跟踪背后运行的传输。在构建浏览器工具或其他后端时选择它；随附的面向模型工具（`dsh-tool-browser`）会自动挂载它。服务本身不发起 Chrome 调用，也不注册面向模型的工具：必须先挂载提供方，标签页或 CDP 调用才能运行。
 
+聊天预览捕获已附加的标签页，不激活 Chrome。`previewMaxBytes` 限制解码后的 PNG 字节数（默认 `1000000`）；`previewIntervalMs` 设置可见实时预览的刷新间隔（默认 `2000` 毫秒）。同一标签页的捕获串行执行。会话作用域的 `browser.preview` 和 `browser.reveal` Remote 方法要求精确的存活 Agent 附加关系；reveal 委托给可选的提供方 `revealTab` 方法，仅用于用户明确操作。
+
 ## 目录
 
 - [使用本包](#use-this-package)
@@ -43,6 +45,8 @@ kind: "package-reference"
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `provider` | （未设置） | 钉住的提供方 id；未设置时在恰好一个可用时自动选择 |
+| `previewMaxBytes` | `1000000` | 聊天预览解码后 PNG 字节数上限 |
+| `previewIntervalMs` | `2000` | 可见实时预览的刷新间隔，单位毫秒 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-browser)是每个已接受字段及其 JSDoc 的穷尽来源。
 
@@ -68,6 +72,7 @@ kind: "package-reference"
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`BrowserRuntime` 服务、提供方注册表和按 owner 限定的附件 |
 | [`src/types.ts`](src/types.ts) | 请求/结果类型、品牌化 id 和 `BrowserError` 分类 |
+| [`src/client.ts`](src/client.ts) | 浏览器安全的标签页 id 和聊天预览类型 |
 | — | 不发布运行时不变式配套插件；附件映射是私有的，选择在每次调用时强制执行；seam 不发布独立的注册表或请求/结果观察流。 |
 
 </details>

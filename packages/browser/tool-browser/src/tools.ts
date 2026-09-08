@@ -74,13 +74,33 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     return snapshot
   }
 
-  const snapshotValue = (tabId: string, snapshot: BrowserSnapshot) => ({
-    tabId,
-    url: snapshot.url,
-    title: snapshot.title,
-    text: snapshot.text,
-    truncated: snapshot.truncated,
-  })
+  const previewProperties = {
+    screenshot: { type: 'string' },
+    previewError: { type: 'string' },
+  } as const
+
+  const previewValue = async (owner: Agent, tabId: ReturnType<typeof BrowserTabId>, signal?: AbortSignal) => {
+    try {
+      const preview = await ctx.browser.preview(owner, tabId, signal)
+      return { url: preview.url, title: preview.title, media: { screenshot: preview.screenshot } }
+    } catch (error) {
+      // Preview failure must not turn a completed browser action into a retryable tool failure.
+      return { url: '', title: '', media: { previewError: error instanceof Error ? error.message : String(error) } }
+    }
+  }
+
+  const snapshotValue = async (owner: Agent, tabId: string, snapshot: BrowserSnapshot, signal?: AbortSignal) => {
+    // Snapshot results carry their own page identity; only the capture is added.
+    const preview = await previewValue(owner, BrowserTabId(tabId), signal)
+    return {
+      tabId,
+      url: snapshot.url,
+      title: snapshot.title,
+      text: snapshot.text,
+      truncated: snapshot.truncated,
+      ...preview.media,
+    }
+  }
 
   const commonMeta = (_args: unknown, value: Record<string, unknown>) => browserMetaFromValue(value)
 
@@ -141,6 +161,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
           tabId: { type: 'string', required: true },
           url: { type: 'string', required: true },
           title: { type: 'string', required: true },
+          ...previewProperties,
         },
       },
       render: (_args, value) => [{ type: 'text', text: `Opened ${value.title} — ${value.url} [${value.tabId}]` }],
@@ -160,7 +181,15 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         signal: exec.signal,
       })
       const opened = await ctx.browser.openTab(owner, { url: args.url, group: true }, exec.signal)
-      return { tabId: opened.tab.id, url: opened.tab.url, title: opened.tab.title }
+      const preview = await previewValue(owner, opened.tab.id, exec.signal)
+      // A tab opened moments ago has not committed its URL yet; the capture's
+      // identity names the page it landed on.
+      return {
+        tabId: opened.tab.id,
+        url: opened.tab.url === '' ? preview.url || args.url : opened.tab.url,
+        title: opened.tab.title === '' ? preview.title : opened.tab.title,
+        ...preview.media,
+      }
     },
     presentCall: args => presentBrowserCall(`Open ${args.url}`, 'fetch'),
     presentResult: (_args, result) => presentBrowserResult('Opened', result.content[0]?.type === 'text' ? result.content[0].text : undefined),
@@ -217,6 +246,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
           tabId: { type: 'string', required: true },
           url: { type: 'string', required: true },
           title: { type: 'string', required: true },
+          ...previewProperties,
           text: { type: 'string', required: true },
           truncated: { type: 'boolean', required: true },
         },
@@ -240,7 +270,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         await cdp.send('Page.reload')
       }
       bumpEpoch(args.tabId)
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`${args.action} ${args.url ?? args.tabId}`, 'fetch'),
     presentResult: () => presentBrowserResult('Navigated'),
@@ -258,6 +288,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
           tabId: { type: 'string', required: true },
           url: { type: 'string', required: true },
           title: { type: 'string', required: true },
+          ...previewProperties,
           text: { type: 'string', required: true },
           truncated: { type: 'boolean', required: true },
         },
@@ -268,7 +299,8 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     timeoutMs: options.timeoutMs,
     isConcurrencySafe: () => true,
     execute: async (args, exec) => {
-      return snapshotValue(args.tabId, await snapshotTab(requireOwner(exec.agent), BrowserTabId(args.tabId), exec.signal))
+      const owner = requireOwner(exec.agent)
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, BrowserTabId(args.tabId), exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Snapshot ${args.tabId}`, 'fetch'),
     presentResult: () => presentBrowserResult('Snapshot'),
@@ -353,6 +385,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       tabId: { type: 'string', required: true },
       url: { type: 'string', required: true },
       title: { type: 'string', required: true },
+      ...previewProperties,
       text: { type: 'string', required: true },
       truncated: { type: 'boolean', required: true },
     },
@@ -396,9 +429,8 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         y = center.y
       }
       if (x === undefined || y === undefined) throw new Error('browser_click needs a ref or x/y')
-      await cdp.send('Page.bringToFront')
       await clickAt(cdp, x, y)
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Click ${args.ref ?? `${args.x},${args.y}`}`, 'execute'),
     presentResult: () => presentBrowserResult('Clicked'),
@@ -438,7 +470,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter' })
         await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter' })
       }
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Type ${args.text}`, 'execute'),
     presentResult: () => presentBrowserResult('Typed'),
@@ -460,7 +492,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: args.key, ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {} })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: args.key, ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {} })
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Key ${args.key}`, 'execute'),
     presentResult: () => presentBrowserResult('Key'),
@@ -487,7 +519,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         deltaX: args.deltaX ?? 0,
         deltaY: args.deltaY ?? 400,
       })
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: () => presentBrowserCall('Scroll', 'execute'),
     presentResult: () => presentBrowserResult('Scrolled'),
@@ -517,7 +549,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         expression: `document.activeElement && [...document.activeElement.options].some(o => { if (o.text === ${JSON.stringify(args.value)} || o.value === ${JSON.stringify(args.value)}) { o.selected = true; document.activeElement.dispatchEvent(new Event('change', { bubbles: true })); return true } return false })`,
         returnByValue: true,
       })
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Select ${args.value}`, 'execute'),
     presentResult: () => presentBrowserResult('Selected'),
@@ -559,7 +591,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         }
         await new Promise(resolve => setTimeout(resolve, 100))
       }
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: args => presentBrowserCall(`Wait ${args.text ?? args.expression ?? ''}`, 'fetch'),
     presentResult: () => presentBrowserResult('Waited'),
@@ -649,7 +681,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
           const params = event.params as { type?: string; args?: { value?: unknown }[] }
           messages.push({
             level: params.type ?? 'log',
-            text: (params.args ?? []).map(arg => String(arg.value ?? '')).join(' '),
+            text: (params.args ?? []).map(arg => typeof arg.value === 'string' ? arg.value : '').join(' '),
           })
         }
       })
@@ -715,7 +747,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       }
       if (x === undefined || y === undefined) throw new Error('browser_hover needs a ref or x/y')
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: () => presentBrowserCall('Hover', 'execute'),
     presentResult: () => presentBrowserResult('Hovered'),
@@ -769,7 +801,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       if (node.backendNodeId === undefined) throw new Error(`snapshot ref "${args.ref}" has no backend node`)
       const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       await cdp.send('DOM.setFileInputFiles', { backendNodeId: node.backendNodeId, files: args.paths })
-      return snapshotValue(args.tabId, await snapshotTab(owner, tabId, exec.signal))
+      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
     },
     presentCall: () => presentBrowserCall('Upload', 'execute'),
     presentResult: () => presentBrowserResult('Uploaded'),

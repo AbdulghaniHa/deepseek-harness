@@ -609,6 +609,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   BrowserCdpEvent: 'browser.md',
   BrowserTab: 'browser.md',
   BrowserTabId: 'browser.md',
+  BrowserTabIdBrand: 'browser.md',
+  BrowserPreview: 'browser.md',
   BrowserAttachment: 'browser.md',
   BrowserAttachmentId: 'browser.md',
   BrowserCapability: 'browser.md',

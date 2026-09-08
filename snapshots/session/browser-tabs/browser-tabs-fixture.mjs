@@ -29,11 +29,11 @@ export function apply(ctx) {
     available: () => true,
     capabilities: () => ['tabs', 'cdp'],
     listTabs: () => Promise.resolve([TAB]),
-    openTab: request => Promise.resolve({ ...TAB, url: request.url, title: 'Opened', grouped: request.group === true }),
+    openTab: request => Promise.resolve({ ...TAB, active: false, url: request.url, grouped: request.group === true }),
     attach: () => Promise.resolve(),
     detach: () => Promise.resolve(),
     closeTab: () => Promise.resolve(),
-    cdp: () => Promise.resolve({}),
+    cdp: request => Promise.resolve(request.method === 'Page.captureScreenshot' ? { data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8xkAAAAASUVORK5CYII=' } : {}),
     onCdpEvent: () => () => {},
   })
 }

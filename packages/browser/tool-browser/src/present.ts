@@ -11,6 +11,7 @@ export interface BrowserToolMeta {
   readonly url?: string
   readonly title?: string
   readonly tabId?: string
+  readonly previewError?: string
   readonly screenshot?: string
 }
 
@@ -48,6 +49,7 @@ export function browserMetaFromValue(value: Record<string, unknown>): JsonValue 
     ...typeof value.url === 'string' ? { url: value.url } : {},
     ...typeof value.title === 'string' ? { title: value.title } : {},
     ...typeof value.tabId === 'string' ? { tabId: value.tabId } : {},
+    ...typeof value.previewError === 'string' ? { previewError: value.previewError } : {},
     ...typeof value.screenshot === 'string' ? { screenshot: value.screenshot } : {},
   }
   if (Object.keys(meta).length === 0) return {}

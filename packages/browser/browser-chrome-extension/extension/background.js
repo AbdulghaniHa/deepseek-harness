@@ -46,19 +46,29 @@ async function dispatch(method, params) {
     case 'tabs.list':
       return (await chrome.tabs.query({})).map(projectTab)
     case 'tabs.create': {
-      const tab = await chrome.tabs.create({ url: params.url })
-      if (params.group === true && tab.id !== undefined) {
-        const groupId = await chrome.tabs.group({ tabIds: [tab.id] })
-        await chrome.tabGroups.update(groupId, { title: params.groupTitle ?? 'DeepSeek', color: 'blue' })
+      let sibling
+      if (params.groupWithTabId !== undefined) {
+        const tabs = await chrome.tabs.query({})
+        sibling = tabs.find(tab => String(tab.id) === params.groupWithTabId)
       }
-      return projectTab(tab)
+      const tab = await chrome.tabs.create({ url: params.url, active: false,
+        ...(sibling === undefined ? {} : { windowId: sibling.windowId }),
+      })
+      if (params.group !== true || tab.id === undefined) return projectTab(tab)
+      const groupId = await chrome.tabs.group({ tabIds: [tab.id],
+        ...(sibling !== undefined && sibling.groupId !== -1 ? { groupId: sibling.groupId } : {}),
+      })
+      await chrome.tabGroups.update(groupId, { title: params.groupTitle ?? 'DeepSeek', color: 'blue' })
+      return projectTab(await chrome.tabs.get(tab.id))
     }
     case 'tabs.close':
       await chrome.tabs.remove(Number(params.tabId))
       return { ok: true }
-    case 'tabs.activate':
-      await chrome.tabs.update(Number(params.tabId), { active: true })
+    case 'tabs.activate': {
+      const tab = await chrome.tabs.update(Number(params.tabId), { active: true })
+      await chrome.windows.update(tab.windowId, { focused: true })
       return { ok: true }
+    }
     case 'debugger.attach': {
       const tabId = Number(params.tabId)
       if (!attached.has(tabId)) {

@@ -46,6 +46,7 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-browser": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^"
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "playwright": "^1.61.1"
   }
 }

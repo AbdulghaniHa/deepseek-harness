@@ -31,8 +31,9 @@ export interface ChromeExtensionProviderOptions {
 }
 
 /**
- * Chrome-extension backend. Connects lazily on first use and throws
- * `BROWSER_NOT_CONNECTED` when the native host is not listening.
+ * Chrome-extension backend. Connects lazily on first use, reconnects on the
+ * next call after the socket drops, and throws `BROWSER_NOT_CONNECTED` when the
+ * native host is not listening.
  */
 export class ChromeExtensionProvider implements BrowserProvider {
   readonly id = CHROME_EXTENSION_PROVIDER_ID
@@ -77,8 +78,13 @@ export class ChromeExtensionProvider implements BrowserProvider {
       url: request.url,
       group: request.group === true,
       groupTitle: this.options.tabGroupTitle,
+      ...request.groupWithTabId === undefined ? {} : { groupWithTabId: request.groupWithTabId },
     }, signal) as BrowserTab
     return normalizeTab(tab)
+  }
+
+  async revealTab(tabId: ReturnType<typeof BrowserTabId>, signal?: AbortSignal): Promise<void> {
+    await this.call('tabs.activate', { tabId }, signal)
   }
 
   async attach(tabId: ReturnType<typeof BrowserTabId>, signal?: AbortSignal): Promise<void> {
@@ -126,21 +132,40 @@ export class ChromeExtensionProvider implements BrowserProvider {
     return await this.call('downloads.list', undefined, signal) as readonly BrowserDownloadItem[]
   }
 
+  /**
+   * Connect once, wrapping a failure in `BROWSER_NOT_CONNECTED`.
+   * @returns a promise that settles with the socket established or fails typed.
+   */
+  private async connectOnce(): Promise<void> {
+    try {
+      await this.client.connect(this.options.socketPath, this.options.connectTimeoutMs)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new BrowserError(
+        `Chrome native host is not connected (${message})`,
+        'BROWSER_NOT_CONNECTED',
+        { cause: error instanceof Error ? error : undefined },
+      )
+    }
+  }
+
+  /**
+   * Ensure a live socket. A connect attempt is shared with concurrent callers
+   * only while it is in flight, so a dropped socket reconnects on the next call
+   * instead of awaiting an already-settled attempt.
+   */
   private async ensureConnected(): Promise<void> {
     if (this.client.connected()) return
-    this.connecting ??= this.client.connect(this.options.socketPath, this.options.connectTimeoutMs)
-      .catch((error: unknown) => {
-        this.connecting = undefined
-        /* v8 ignore next -- connect() rejects with Error from net.Socket. */
-        const message = error instanceof Error ? error.message : String(error)
-        throw new BrowserError(
-          `Chrome native host is not connected (${message})`,
-          'BROWSER_NOT_CONNECTED',
-          /* v8 ignore next -- connect() rejects with Error. */
-          { cause: error instanceof Error ? error : undefined },
-        )
-      })
-    await this.connecting
+    const attempt = this.connectOnce()
+    this.connecting = attempt
+    try {
+      await attempt
+    } finally {
+      if (this.connecting === attempt) this.connecting = undefined
+    }
+    if (!this.client.connected()) {
+      throw new BrowserError('Chrome native host is not connected', 'BROWSER_NOT_CONNECTED')
+    }
   }
 
   private async call(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {

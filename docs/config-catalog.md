@@ -325,10 +325,14 @@ Source: [`packages/shell/bash-sandbox/src/index.ts:35`](../packages/shell/bash-s
 export interface BrowserRuntimeConfig {
   /** Explicit provider id. Omitted = auto-select when exactly one usable. */
   readonly provider?: string
+  /** Maximum decoded PNG bytes returned by the chat preview. */
+  readonly previewMaxBytes?: number
+  /** Delay between visible chat preview refreshes, in milliseconds. */
+  readonly previewIntervalMs?: number
 }
 ```
 
-Source: [`packages/browser/browser/src/index.ts:72`](../packages/browser/browser/src/index.ts)
+Source: [`packages/browser/browser/src/index.ts:74`](../packages/browser/browser/src/index.ts)
 
 <a id="deepseek-aidsh-browser-chrome-extension"></a>
 

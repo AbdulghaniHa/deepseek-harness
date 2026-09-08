@@ -37,26 +37,29 @@ export class BrowserHostClient {
    * @param timeoutMs - connect timeout.
    */
   async connect(socketPath: string, timeoutMs: number): Promise<void> {
-    if (this.socket !== undefined) return
-    this.socket = await new Promise<Socket>((resolve, reject) => {
-      const socket = createConnection(socketPath)
+    if (this.socket !== undefined && !this.socket.destroyed) return
+    const socket = await new Promise<Socket>((resolve, reject) => {
+      const connecting = createConnection(socketPath)
       /* v8 ignore start -- connect timeout needs a peer that neither accepts nor errors. */
       const timer = setTimeout(() => {
-        socket.destroy()
+        connecting.destroy()
         reject(new Error(`browser host connect timed out after ${timeoutMs}ms`))
       }, timeoutMs)
       /* v8 ignore stop */
-      socket.once('connect', () => {
+      connecting.once('connect', () => {
         clearTimeout(timer)
-        resolve(socket)
+        resolve(connecting)
       })
-      socket.once('error', (error) => {
+      connecting.once('error', (error) => {
         clearTimeout(timer)
         reject(error)
       })
     })
-    this.socket.on('data', chunk => this.onData(chunk))
-    this.socket.on('close', () => this.failAll(new Error('browser host socket closed')))
+    this.socket = socket
+    // A replaced socket may still emit data or close; only the current one owns
+    // the frame buffer and pending requests.
+    socket.on('data', (chunk) => { if (this.socket === socket) this.onData(chunk) })
+    socket.on('close', () => { if (this.socket === socket) this.failAll(new Error('browser host socket closed')) })
   }
 
   /**

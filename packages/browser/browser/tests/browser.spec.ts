@@ -318,3 +318,181 @@ describe('BrowserRuntime facets', () => {
     ])
   })
 })
+
+describe('chat preview ownership', () => {
+  it('captures without bringing Chrome forward and reveals only explicitly', async () => {
+    const { browser, ctx } = await mount()
+    const owner = makeAgent('preview')
+    const revealed: string[] = []
+    const provider = makeProvider('chrome', true, {
+      cdp: () => Promise.resolve({ data: 'AAAA' }),
+      revealTab: async (tabId) => { revealed.push(tabId) },
+    })
+    browser.registerProvider(provider)
+    await browser.attach(owner, BrowserTabId('1'))
+    await expect(browser.preview(owner, BrowserTabId('1'))).resolves.toMatchObject({ screenshot: 'AAAA', tabId: '1' })
+    expect(revealed).toEqual([])
+    await browser.reveal(owner, BrowserTabId('1'))
+    expect(revealed).toEqual(['1'])
+    await expect(browser.preview(makeAgent('preview'), BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_NOT_ATTACHED' })
+    await expect(browser.reveal(makeAgent('preview'), BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_NOT_ATTACHED' })
+    await ctx.fiber.dispose()
+  })
+
+  it('names a freshly opened tab once its URL commits', async () => {
+    const { browser, ctx } = await mount()
+    const owner = makeAgent('preview')
+    const reads = [
+      { ...tab('1'), url: '', title: '' },
+      { ...tab('1'), url: 'https://example.com/', title: 'Example Domain' },
+    ]
+    let read = 0
+    browser.registerProvider(makeProvider('chrome', true, {
+      cdp: () => Promise.resolve({ data: 'AAAA' }),
+      listTabs: async () => [reads[Math.min(read++, reads.length - 1)]!],
+    }))
+    await browser.attach(owner, BrowserTabId('1'))
+    await expect(browser.preview(owner, BrowserTabId('1')))
+      .resolves.toMatchObject({ url: 'https://example.com/', title: 'Example Domain' })
+    await ctx.fiber.dispose()
+  })
+
+  it('rejects oversized, missing, and malformed captures and closed tabs', async () => {
+    const { browser, ctx } = await mount({ previewMaxBytes: 2 })
+    const owner = makeAgent('preview')
+    let data: unknown = 'AAAA'
+    let tabs = [tab('1')]
+    browser.registerProvider(makeProvider('chrome', true, {
+      cdp: async () => ({ data }), listTabs: async () => tabs,
+    }))
+    await browser.attach(owner, BrowserTabId('1'))
+    await expect(browser.preview(owner, BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_PREVIEW_TOO_LARGE' })
+    data = 'AAA='
+    await expect(browser.preview(owner, BrowserTabId('1'))).resolves.toMatchObject({ screenshot: 'AAA=' })
+    for (data of ['', undefined, '!!==']) {
+      await expect(browser.preview(owner, BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_PREVIEW_UNAVAILABLE' })
+    }
+    tabs = []
+    await expect(browser.preview(owner, BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_TAB_GONE' })
+    await expect(browser.reveal(owner, BrowserTabId('1'))).rejects.toMatchObject({ code: 'BROWSER_FACET_UNAVAILABLE' })
+    await ctx.fiber.dispose()
+  })
+
+  it('serializes opens and reuses only the same agent group', async () => {
+    const { browser, ctx } = await mount()
+    const requests: unknown[] = []
+    browser.registerProvider(makeProvider('chrome', true, {
+      openTab: async (request) => { requests.push(request); return tab(String(requests.length)) },
+    }))
+    const owner = makeAgent('one')
+    await Promise.all([browser.openTab(owner, { url: 'https://one', group: true }), browser.openTab(owner, { url: 'https://two', group: true })])
+    await browser.openTab(makeAgent('two'), { url: 'https://three', group: true })
+    expect(requests).toEqual([
+      { url: 'https://one', group: true },
+      { url: 'https://two', group: true, groupWithTabId: '1' },
+      { url: 'https://three', group: true },
+    ])
+    await ctx.fiber.dispose()
+  })
+
+  it('starts a new group after the predecessor tab is closed', async () => {
+    const { browser, ctx } = await mount()
+    const requests: unknown[] = []
+    const tabs = new Map<string, BrowserTab>()
+    browser.registerProvider(makeProvider('chrome', true, {
+      listTabs: async () => [...tabs.values()],
+      openTab: async (request) => {
+        requests.push(request)
+        const opened = tab(String(requests.length), { url: request.url })
+        tabs.set(opened.id, opened)
+        return opened
+      },
+      closeTab: async (tabId) => { tabs.delete(tabId) },
+    }))
+    const owner = makeAgent('one')
+    const first = await browser.openTab(owner, { url: 'https://one', group: true })
+    await browser.closeTab(owner, first.tab.id)
+    await browser.openTab(owner, { url: 'https://two', group: true })
+    expect(requests).toEqual([
+      { url: 'https://one', group: true },
+      { url: 'https://two', group: true },
+    ])
+    await ctx.fiber.dispose()
+  })
+
+  it('rejects non-positive preview limits at load', async () => {
+    await expect(new Context().plugin(BrowserRuntime, { previewMaxBytes: 0 }))
+      .rejects.toThrow('previewMaxBytes')
+    await expect(new Context().plugin(BrowserRuntime, { previewIntervalMs: 0 }))
+      .rejects.toThrow('previewIntervalMs')
+  })
+
+  it('serializes captures for one tab and honors abort before and after Chrome returns', async () => {
+    const { browser, ctx } = await mount()
+    const owner = makeAgent('preview')
+    const order: string[] = []
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => { release = resolve })
+    let started!: () => void
+    const sawStart = new Promise<void>((resolve) => { started = resolve })
+    let blocked: Promise<void> = Promise.resolve()
+    let proceed!: () => void
+    let entered: (() => void) | undefined
+    let n = 0
+    browser.registerProvider(makeProvider('chrome', true, {
+      cdp: async () => {
+        const id = String(++n)
+        order.push(`start-${id}`)
+        if (id === '1') started()
+        entered?.()
+        if (id === '1') await hold
+        await blocked
+        order.push(`end-${id}`)
+        return { data: 'AAAA' }
+      },
+    }))
+    await browser.attach(owner, BrowserTabId('1'))
+    const early = new AbortController()
+    early.abort()
+    await expect(browser.preview(owner, BrowserTabId('1'), early.signal)).rejects.toThrow()
+    const first = browser.preview(owner, BrowserTabId('1'))
+    const second = browser.preview(owner, BrowserTabId('1'))
+    await sawStart
+    expect(order).toEqual(['start-1'])
+    release()
+    await Promise.all([first, second])
+    expect(order).toEqual(['start-1', 'end-1', 'start-2', 'end-2'])
+    blocked = new Promise<void>((resolve) => { proceed = resolve })
+    const sawCdp = new Promise<void>((resolve) => { entered = resolve })
+    const mid = new AbortController()
+    const pending = browser.preview(owner, BrowserTabId('1'), mid.signal)
+    await sawCdp
+    mid.abort()
+    proceed()
+    await expect(pending).rejects.toThrow()
+    await ctx.fiber.dispose()
+  })
+
+  it('applies preview defaults when config omits the fields', async () => {
+    const ctx = new Context()
+    new BrowserRuntime(ctx)
+    await ctx.fiber.dispose()
+  })
+
+  it('opens an ungrouped tab and releases the open lock after a failed grouped open', async () => {
+    const { browser, ctx } = await mount()
+    browser.registerProvider(makeProvider('chrome', true, {
+      openTab: async (request) => {
+        if (request.url === 'https://fail') throw new Error('nope')
+        return tab('plain', { url: request.url, grouped: request.group === true })
+      },
+    }))
+    const owner = makeAgent('one')
+    await expect(browser.openTab(owner, { url: 'https://plain' }))
+      .resolves.toMatchObject({ tab: { grouped: false } })
+    await expect(browser.openTab(owner, { url: 'https://fail', group: true })).rejects.toThrow('nope')
+    await expect(browser.openTab(owner, { url: 'https://after', group: true }))
+      .resolves.toMatchObject({ tab: { url: 'https://after' } })
+    await ctx.fiber.dispose()
+  })
+})

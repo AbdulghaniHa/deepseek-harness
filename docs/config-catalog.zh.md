@@ -327,6 +327,10 @@ export type Config = LocalConfig
 export interface BrowserRuntimeConfig {
   /** Explicit provider id. Omitted = auto-select when exactly one usable. */
   readonly provider?: string
+  /** Maximum decoded PNG bytes returned by the chat preview. */
+  readonly previewMaxBytes?: number
+  /** Delay between visible chat preview refreshes, in milliseconds. */
+  readonly previewIntervalMs?: number
 }
 ```
 

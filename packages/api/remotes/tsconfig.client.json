@@ -25,7 +25,6 @@
     },
     {
       "path": "../../credentials/credentials"
-
     },
     {
       "path": "../../context/file-reference"
@@ -77,6 +76,9 @@
     },
     {
       "path": "../../typert/protocol"
+    },
+    {
+      "path": "../../browser/browser"
     }
   ]
 }

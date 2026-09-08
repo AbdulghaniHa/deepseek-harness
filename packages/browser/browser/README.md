@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 Any plugin or tool can list tabs, attach, and send CDP through `dsh-browser` (`ctx.browser`) without binding to Chrome Native Messaging. Providers plug in as backends, and the service picks one usable provider, so callers never track which transport runs behind a call. Choose it when building browser tooling or another backend; the shipped model-facing tools (`dsh-tool-browser`) mount it automatically. The service itself makes no Chrome calls and registers no model-facing tool: a provider must be mounted before tab or CDP calls can run.
 
+Chat previews capture an attached tab without activating Chrome. `previewMaxBytes` caps decoded PNG bytes (default `1000000`); `previewIntervalMs` sets the visible live-preview refresh delay (default `2000` ms). Captures for one tab execute serially. The session-scoped `browser.preview` and `browser.reveal` Remote methods require the exact live Agent attachment; reveal delegates to the optional provider `revealTab` method and is reserved for explicit user actions.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -43,6 +45,8 @@ Load the service and let a single mounted backend auto-select, or pin a provider
 | Field | Default | Meaning |
 |---|---|---|
 | `provider` | (unset) | Pinned provider id; unset auto-selects when exactly one is usable |
+| `previewMaxBytes` | `1000000` | Maximum decoded PNG bytes for a chat preview |
+| `previewIntervalMs` | `2000` | Delay between visible live-preview refreshes, in milliseconds |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-browser) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -68,6 +72,7 @@ Failures throw `BrowserError` with a stable, machine-routable code. Callers rout
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: the `BrowserRuntime` service, provider registry, and owner-scoped attachments |
 | [`src/types.ts`](src/types.ts) | Request/result types, branded ids, and the `BrowserError` taxonomy |
+| [`src/client.ts`](src/client.ts) | Browser-safe tab id and chat preview types |
 | — | No runtime invariant companion is published; attachment maps are private and selection is enforced on each call; the seam publishes no independent registry or request/result observation stream. |
 
 </details>

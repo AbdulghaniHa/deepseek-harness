@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import BrowserRuntime, { BrowserTabId } from '@deepseek-ai/dsh-browser'
-import { apply, Config, ChromeExtensionProvider, CHROME_EXTENSION_PROVIDER_ID, defaultBrowserSocketPath } from '@deepseek-ai/dsh-browser-chrome-extension'
+import { apply, Config, ChromeExtensionProvider, CHROME_EXTENSION_PROVIDER_ID } from '@deepseek-ai/dsh-browser-chrome-extension'
 import { decodeFrames, encodeFrame, rpcFailure, rpcNotify, rpcRequest, rpcSuccess } from '../src/protocol/index.ts'
 import { BrowserHostClient } from '../src/socket.ts'
 
@@ -24,7 +24,7 @@ async function listen(): Promise<{ path: string; onClient: Promise<NetSocket> }>
   const path = join(root, 'host.sock')
   let resolveClient: (socket: NetSocket) => void
   const onClient = new Promise<NetSocket>((resolve) => { resolveClient = resolve })
-  server = createServer(socket => resolveClient(socket))
+  server = createServer((socket) => { resolveClient(socket) })
   await new Promise<void>((resolve, reject) => {
     server!.listen(path, resolve)
     server!.once('error', reject)
@@ -44,7 +44,7 @@ describe('BrowserHostClient', () => {
     const stopNotify = client.onNotification((message) => { seen.push(message) })
     const pending = client.request('tabs.list', undefined, { clientId: 'c', timeoutMs: 200 })
     const first = await new Promise<unknown>((resolve) => {
-      socket.once('data', chunk => resolve(decodeFrames(chunk).messages[0]))
+      socket.once('data', (chunk) => { resolve(decodeFrames(chunk).messages[0]) })
     })
     expect(first).toMatchObject({ method: 'tabs.list' })
     socket.write(encodeFrame(rpcSuccess((first as { id: number }).id, [{ id: '1' }])))
@@ -141,16 +141,17 @@ describe('plugin apply', () => {
   it('registers the provider on ctx.browser and rejects non-positive timeouts', async () => {
     const ctx = new Context()
     await ctx.plugin(BrowserRuntime, {})
-    expect(() => apply(ctx, { connectTimeoutMs: 0, requestTimeoutMs: 1000 } as never))
+    expect(() => { apply(ctx, { connectTimeoutMs: 0, requestTimeoutMs: 1000 }) })
       .toThrow('connectTimeoutMs')
-    expect(() => apply(ctx, { connectTimeoutMs: 10, requestTimeoutMs: 0 } as never))
+    expect(() => { apply(ctx, { connectTimeoutMs: 10, requestTimeoutMs: 0 }) })
       .toThrow('requestTimeoutMs')
-    apply(ctx, Config({ requestTimeoutMs: 1000, connectTimeoutMs: 10, tabGroupTitle: 'X' }))
+    root = await mkdtemp(join(tmpdir(), 'dsh-browser-offline-'))
+    apply(ctx, Config({ socketPath: join(root, 'missing.sock'), requestTimeoutMs: 1000, connectTimeoutMs: 10, tabGroupTitle: 'X' }))
     await expect(ctx.browser.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' }))
     const ctx2 = new Context()
     await ctx2.plugin(BrowserRuntime, {})
     apply(ctx2, Config({
-      socketPath: defaultBrowserSocketPath('win32'),
+      socketPath: join(root, 'also-missing.sock'),
       requestTimeoutMs: 1000,
       connectTimeoutMs: 10,
     }))
@@ -181,7 +182,7 @@ describe('ChromeExtensionProvider methods', () => {
           socket.write(encodeFrame(rpcSuccess(request.id, {
             id: '2', url: request.params?.url, title: 'New', active: true, windowId: 1, grouped: true,
           })))
-        } else if (request.method === 'debugger.attach' || request.method === 'debugger.detach' || request.method === 'tabs.close') {
+        } else if (request.method === 'debugger.attach' || request.method === 'debugger.detach' || request.method === 'tabs.close' || request.method === 'tabs.activate') {
           socket.write(encodeFrame(rpcSuccess(request.id, null)))
         } else if (request.method === 'debugger.sendCommand') {
           socket.write(encodeFrame(rpcSuccess(request.id, { ok: true })))
@@ -203,6 +204,8 @@ describe('ChromeExtensionProvider methods', () => {
     await listing
     const tab = BrowserTabId('1')
     await expect(provider.openTab({ url: 'https://opened', group: true })).resolves.toMatchObject({ url: 'https://opened' })
+    await expect(provider.openTab({ url: 'https://sibling', group: true, groupWithTabId: tab })).resolves.toMatchObject({ url: 'https://sibling' })
+    await provider.revealTab(tab)
     await provider.attach(tab)
     await provider.cdp({ tabId: tab, method: 'Page.enable' })
     await provider.detach(tab)
@@ -243,8 +246,22 @@ describe('ChromeExtensionProvider methods', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'BROWSER_PROTOCOL' }))
   })
 
-  it('maps a closed socket after a live connection to BROWSER_NOT_CONNECTED', async () => {
-    const { path, onClient } = await listen()
+  it('reconnects on the next call after the host socket closes', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-browser-sock-'))
+    const path = join(root, 'host.sock')
+    const sockets: NetSocket[] = []
+    server = createServer((socket) => {
+      sockets.push(socket)
+      socket.on('data', (chunk) => {
+        for (const message of decodeFrames(chunk).messages) {
+          socket.write(encodeFrame(rpcSuccess((message as { id: number }).id, [{ id: '1' }])))
+        }
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      server!.listen(path, resolve)
+      server!.once('error', reject)
+    })
     const provider = new ChromeExtensionProvider({
       socketPath: path,
       connectTimeoutMs: 1000,
@@ -252,18 +269,11 @@ describe('ChromeExtensionProvider methods', () => {
       tabGroupTitle: 'DeepSeek',
       clientId: 'test',
     })
-    const first = provider.listTabs()
-    const socket = await onClient
-    socket.on('data', (chunk) => {
-      for (const message of decodeFrames(chunk).messages) {
-        const request = message as { id: number }
-        socket.write(encodeFrame(rpcSuccess(request.id, [])))
-      }
-    })
-    await first
-    socket.destroy()
+    await expect(provider.listTabs()).resolves.toHaveLength(1)
+    sockets[0]!.destroy()
     await new Promise(resolve => setTimeout(resolve, 20))
-    await expect(provider.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' }))
+    await expect(provider.listTabs()).resolves.toHaveLength(1)
+    expect(sockets).toHaveLength(2)
   })
 })
 

@@ -20,7 +20,10 @@ interface BrowserProvider {
   /** Facets this backend can serve right now. */
   capabilities(): readonly BrowserCapability[]
   listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>
+  /** Open without changing the active tab or focused window. */
   openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>
+  /** Activate the selected tab and focus its window only on explicit user request. */
+  revealTab?(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
   closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>
@@ -53,6 +56,8 @@ interface BrowserOpenTabRequest {
   readonly url: string
   /** When true, the provider places the tab in the agent tab group. */
   readonly group?: boolean
+  /** Reuse this agent-created tab's group when it still exists. */
+  readonly groupWithTabId?: BrowserTabId
 }
 ```
 
@@ -66,6 +71,18 @@ interface BrowserCdpRequest {
 ```
 
 Owner-scoped attachments fence `attach` / `openTab` / `cdp` / `closeTab` to the exact `Agent` object. The provider attaches a tab once while any owner holds it; the last detach calls provider `detach`. Optional Chrome-API facets (`history`, `bookmarks`, `readingList`, `downloads`) fail at the call with `BROWSER_FACET_UNAVAILABLE` when the selected provider does not advertise them.
+
+```ts type-equiv
+/** A transient chat preview; image bytes are never implicitly sent to the model. */
+interface BrowserPreview {
+  readonly tabId: BrowserTabId
+  readonly url: string
+  readonly title: string
+  readonly screenshot: string
+  readonly capturedAt: number
+  readonly refreshIntervalMs: number
+}
+```
 
 ## Errors
 
@@ -156,6 +173,25 @@ async closeTab(owner: Agent, tabId: BrowserTabId, signal?: AbortSignal): Promise
  * @returns the CDP result value.
  */
 async cdp(owner: Agent, request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>
+
+/**
+ * Capture an attached tab for a chat preview without activating Chrome.
+ * `url` and `title` describe the tab after the capture, so a tab that had not
+ * committed its URL yet reports the page it landed on.
+ * @param agent - exact live Agent whose attachment authorizes the capture.
+ * @param tabId - attached tab to preview.
+ * @param signal - cancellation forwarded to Chrome.
+ * @returns bounded PNG data and capture time; oversized captures throw.
+ */
+@Remote('preview') async preview(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<BrowserPreview>
+
+/**
+ * Reveal an attached tab in Chrome after an explicit user action.
+ * @param agent - exact live Agent whose attachment authorizes the reveal.
+ * @param tabId - attached tab to activate.
+ * @param signal - cancellation forwarded to the provider.
+ */
+@Remote('reveal') async reveal(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<void>
 
 /**
  * Subscribe to CDP events from the selected provider.
