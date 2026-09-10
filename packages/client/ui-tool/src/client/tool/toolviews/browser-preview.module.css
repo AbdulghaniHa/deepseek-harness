@@ -1,25 +1,38 @@
-.preview,
-.expanded {
+/* Zero-height in-flow seat: the floating panel reads its top edge to sit just
+   above the composer without occupying any chat width. */
+.anchor {
+  height: 0;
+}
+
+.floating {
+  position: fixed;
+  right: 20px;
+  z-index: 10;
+  width: 360px;
+  max-width: calc(100vw - 40px);
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
   overflow: hidden;
-  margin: 8px 0 12px 24px;
-  max-width: 420px;
+  box-shadow: var(--dsw-elevation-prominent);
   font: var(--dsw-font-xs-13);
   color: var(--dsw-alias-label-secondary);
   background: var(--dsw-alias-bg-base);
 }
 
 .expanded {
-  max-width: 100%;
+  width: min(760px, calc(100vw - 40px));
 }
 
 .header,
-.controls {
+.footer {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
+}
+
+.footer {
+  padding-top: 6px;
 }
 
 .identity {
@@ -30,13 +43,19 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.status,
+.timestamp {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+}
+
 .imageButton {
   display: block;
   padding: 0;
   border: 0;
   width: 100%;
   cursor: zoom-in;
-  background: transparent;
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 .expanded .imageButton {
@@ -46,23 +65,26 @@
 .image {
   display: block;
   width: 100%;
-  height: auto;
+  max-height: 180px;
+  object-fit: contain;
+  object-position: top center;
 }
 
-.timestamp {
-  display: block;
-  padding: 4px 10px;
-  color: var(--dsw-alias-label-caption);
+.expanded .image {
+  max-height: 60vh;
 }
 
 .failure {
+  flex: 1;
   margin: 0;
-  padding: 0 10px 8px;
   color: var(--dsw-alias-state-error-primary);
 }
 
 .controls {
+  display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .controls button {

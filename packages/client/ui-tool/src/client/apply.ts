@@ -18,6 +18,7 @@ import { searchToolview } from './tool/toolviews/search-row.tsx'
 import { todoToolview } from './tool/toolviews/todo-row.tsx'
 import { webToolview } from './tool/toolviews/web-row.tsx'
 import { browserToolview } from './tool/toolviews/browser-row.tsx'
+import { browserPreviewDock } from './tool/toolviews/browser-preview.tsx'
 import { computerToolview } from './tool/toolviews/computer-row.tsx'
 
 /** Required services: the slot registry and the Remote face carrying the Host home used for POSIX `~`. */
@@ -56,6 +57,7 @@ export function apply(ctx: ClientContext): void {
   ctx.plugin(searchToolview)
   ctx.plugin(webToolview)
   ctx.plugin(browserToolview)
+  ctx.plugin(browserPreviewDock)
   ctx.plugin(computerToolview)
   ctx.plugin(todoToolview)
   ctx.plugin(askQuestionToolview)
