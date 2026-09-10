@@ -10,9 +10,17 @@ import { BrowserTabId } from '@deepseek-ai/dsh-browser'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { BrowserSnapshot } from './snapshot.ts'
 import { buildSnapshot, resolveRef } from './snapshot.ts'
+import { boundResponseBody, createNetworkCapture, type NetworkRequestEntry } from './network.ts'
 import { approveBrowserAction, type BrowserApprovalMode } from './approval.ts'
-import { browserMetaFromValue, formatSnapshot, presentBrowserCall, presentBrowserResult } from './present.ts'
-import { cdpClient, clickAt, nodeCenter, pageIdentity, typeText } from './cdp.ts'
+import {
+  browserMetaFromValue,
+  formatNetworkBody,
+  formatNetworkList,
+  formatSnapshot,
+  presentBrowserCall,
+  presentBrowserResult,
+} from './present.ts'
+import { cdpClient, clickAt, nodeCenter, pageIdentity, typeText, type CdpClient } from './cdp.ts'
 import type { BrowserApprover } from './approval.ts'
 
 /** Resolved tool-browser config used while registering tools. */
@@ -22,8 +30,13 @@ export interface ToolBrowserOptions {
   readonly screenshotMaxBytes: number
   readonly evaluateTimeoutMs: number
   readonly allowRawCdp: boolean
+  readonly networkMaxRequests: number
+  readonly networkMaxBodyBytes: number
   readonly timeoutMs: number
 }
+
+/** Default entry ceiling when the caller omits `limit`. */
+const DEFAULT_NETWORK_LIMIT = 50
 
 interface TabState {
   epoch: number
@@ -38,11 +51,47 @@ interface TabState {
 export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions): void {
   const states = new Map<string, TabState>()
   const approval = ctx.get('approval') as BrowserApprover | undefined
+  const capture = createNetworkCapture({ maxRequests: options.networkMaxRequests })
+  ctx.effect(() => ctx.browser.onCdpEvent((event) => { capture.record(event) }), 'tool-browser network capture')
 
   const requireOwner = (agent: Agent | undefined): Agent => {
     if (agent === undefined) throw new Error('browser tools require an agent')
     return agent
   }
+
+  /**
+   * Turn on request capture for one tab. Chrome accepts `Network.enable` only
+   * while the caller is attached, so a rejected enable leaves the tab unarmed
+   * and the next call retries instead of reporting a silent empty capture.
+   */
+  const armNetwork = async (cdp: CdpClient, tabId: string): Promise<void> => {
+    if (capture.isArmed(tabId)) return
+    await cdp.send('Network.enable')
+    capture.arm(tabId)
+  }
+
+  /** Map one buffered entry to the canonical tool value. */
+  const requestValue = (entry: NetworkRequestEntry): {
+    requestId: string
+    method: string
+    url: string
+    resourceType: string
+    status?: number
+    statusText?: string
+    mimeType?: string
+    failed?: string
+    encodedDataLength?: number
+  } => ({
+    requestId: entry.requestId,
+    method: entry.method,
+    url: entry.url,
+    resourceType: entry.resourceType,
+    ...entry.status !== undefined ? { status: entry.status } : {},
+    ...entry.statusText !== undefined ? { statusText: entry.statusText } : {},
+    ...entry.mimeType !== undefined ? { mimeType: entry.mimeType } : {},
+    ...entry.failed !== undefined ? { failed: entry.failed } : {},
+    ...entry.encodedDataLength !== undefined ? { encodedDataLength: entry.encodedDataLength } : {},
+  })
 
   const tabState = (tabId: string): TabState => {
     const existing = states.get(tabId)
@@ -694,6 +743,115 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
   }))
 
   ctx.tools.register(defineTool({
+    name: 'browser_network',
+    description: 'List the HTTP requests captured from an attached tab. Capture starts at the first call for a tab, so call this before the interaction to inspect and again after it.',
+    parameters: {
+      tabId: { type: 'string', required: true, description: 'Attached tab id.' },
+      filter: { type: 'string', description: 'Return only requests whose URL contains this text, ignoring case.' },
+      limit: { type: 'integer', description: `Maximum entries to return, newest kept. Defaults to ${DEFAULT_NETWORK_LIMIT}.` },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          tabId: { type: 'string', required: true },
+          requests: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                requestId: { type: 'string', required: true },
+                method: { type: 'string', required: true },
+                url: { type: 'string', required: true },
+                resourceType: { type: 'string', required: true },
+                status: { type: 'integer' },
+                statusText: { type: 'string' },
+                mimeType: { type: 'string' },
+                failed: { type: 'string' },
+                encodedDataLength: { type: 'integer' },
+              },
+            },
+          },
+          truncated: { type: 'boolean', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: formatNetworkList(value) }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    isConcurrencySafe: () => true,
+    execute: async (args, exec) => {
+      const owner = requireOwner(exec.agent)
+      const tabId = BrowserTabId(args.tabId)
+      if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1)) {
+        throw new Error('browser_network limit must be a positive integer')
+      }
+      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      await armNetwork(cdp, args.tabId)
+      const matched = capture.list(args.tabId)
+        .filter(entry => args.filter === undefined || entry.url.toLowerCase().includes(args.filter.toLowerCase()))
+      const limit = Math.min(args.limit ?? DEFAULT_NETWORK_LIMIT, options.networkMaxRequests)
+      const requests = (matched.length > limit ? matched.slice(-limit) : matched).map(requestValue)
+      return { tabId: args.tabId, requests, truncated: matched.length > limit }
+    },
+    presentCall: args => presentBrowserCall(`Network ${args.tabId}`, 'fetch'),
+    presentResult: () => presentBrowserResult('Network'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'browser_network_body',
+    description: 'Read the response body of a request captured by browser_network. A binary body is reported by size instead of being inlined.',
+    parameters: {
+      tabId: { type: 'string', required: true, description: 'Attached tab id.' },
+      requestId: { type: 'string', required: true, description: 'requestId from a browser_network result.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          tabId: { type: 'string', required: true },
+          requestId: { type: 'string', required: true },
+          encoding: { type: 'string', required: true, enum: ['utf8', 'base64'] },
+          bytes: { type: 'integer', required: true },
+          truncated: { type: 'boolean', required: true },
+          body: { type: 'string' },
+          url: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: formatNetworkBody(value) }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    isConcurrencySafe: () => true,
+    execute: async (args, exec) => {
+      const owner = requireOwner(exec.agent)
+      const tabId = BrowserTabId(args.tabId)
+      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      await armNetwork(cdp, args.tabId)
+      const bounded = boundResponseBody(
+        await cdp.send('Network.getResponseBody', { requestId: args.requestId }),
+        options.networkMaxBodyBytes,
+      )
+      const captured = capture.list(args.tabId).find(entry => entry.requestId === args.requestId)
+      return {
+        tabId: args.tabId,
+        requestId: args.requestId,
+        encoding: bounded.encoding,
+        bytes: bounded.bytes,
+        truncated: bounded.truncated,
+        ...bounded.body !== undefined ? { body: bounded.body } : {},
+        ...captured !== undefined ? { url: captured.url } : {},
+      }
+    },
+    presentCall: args => presentBrowserCall(`Body ${args.requestId}`, 'fetch'),
+    presentResult: () => presentBrowserResult('Body'),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'browser_close',
     description: 'Close an attached Chrome tab.',
     parameters: { tabId: { type: 'string', required: true } },
@@ -710,6 +868,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       const owner = requireOwner(exec.agent)
       await ctx.browser.closeTab(owner, BrowserTabId(args.tabId), exec.signal)
       states.delete(args.tabId)
+      capture.drop(args.tabId)
       return { tabId: args.tabId, closed: true }
     },
     presentCall: args => presentBrowserCall(`Close ${args.tabId}`, 'execute'),

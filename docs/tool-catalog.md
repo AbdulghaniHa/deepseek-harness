@@ -40,7 +40,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
 | `@deepseek-ai/dsh-tool-computer-use` | `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
@@ -2509,6 +2509,61 @@ Navigate an attached tab: goto, back, forward, or reload.
   "required": [
     "tabId",
     "action"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_network`
+
+List the HTTP requests captured from an attached tab. Capture starts at the first call for a tab, so call this before the interaction to inspect and again after it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string",
+      "description": "Attached tab id."
+    },
+    "filter": {
+      "type": "string",
+      "description": "Return only requests whose URL contains this text, ignoring case."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum entries to return, newest kept. Defaults to 50."
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_network_body`
+
+Read the response body of a request captured by browser_network. A binary body is reported by size instead of being inlined.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string",
+      "description": "Attached tab id."
+    },
+    "requestId": {
+      "type": "string",
+      "description": "requestId from a browser_network result."
+    }
+  },
+  "required": [
+    "tabId",
+    "requestId"
   ]
 }
 ```

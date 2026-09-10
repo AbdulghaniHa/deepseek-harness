@@ -251,6 +251,51 @@
       }
     },
     {
+      "name": "browser_network",
+      "description": "List the HTTP requests captured from an attached tab. Capture starts at the first call for a tab, so call this before the interaction to inspect and again after it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string",
+            "description": "Attached tab id."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Return only requests whose URL contains this text, ignoring case."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum entries to return, newest kept. Defaults to 50."
+          }
+        },
+        "required": [
+          "tabId"
+        ]
+      }
+    },
+    {
+      "name": "browser_network_body",
+      "description": "Read the response body of a request captured by browser_network. A binary body is reported by size instead of being inlined.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string",
+            "description": "Attached tab id."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "requestId from a browser_network result."
+          }
+        },
+        "required": [
+          "tabId",
+          "requestId"
+        ]
+      }
+    },
+    {
       "name": "browser_open",
       "description": "Open a URL in a new Chrome tab and attach to it.",
       "parameters": {

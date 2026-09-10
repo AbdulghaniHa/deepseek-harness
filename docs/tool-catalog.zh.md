@@ -44,7 +44,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
 | `@deepseek-ai/dsh-tool-computer-use` | `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_type`, `computer_wait_for` | `ctx.tools`、`ctx.computer`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result`、`computer/app-grant` | - | computer_* 工具把原生 helper 放在 ctx.computer 之后，使模型可见名称在 helper 宕机时保持稳定。`dsh-base` 发布时为 `enabled: false`。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
@@ -2517,6 +2517,61 @@ Navigate an attached tab: goto, back, forward, or reload.
   "required": [
     "tabId",
     "action"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_network`
+
+列出从已附加标签页捕获的 HTTP 请求。捕获从某个标签页的首次调用开始，因此请在被检查的交互之前调用一次，并在该交互之后再次调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string",
+      "description": "Attached tab id."
+    },
+    "filter": {
+      "type": "string",
+      "description": "Return only requests whose URL contains this text, ignoring case."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum entries to return, newest kept. Defaults to 50."
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_network_body`
+
+读取 browser_network 已捕获请求的响应体。二进制响应体只按大小报告，不会内联。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string",
+      "description": "Attached tab id."
+    },
+    "requestId": {
+      "type": "string",
+      "description": "requestId from a browser_network result."
+    }
+  },
+  "required": [
+    "tabId",
+    "requestId"
   ]
 }
 ```

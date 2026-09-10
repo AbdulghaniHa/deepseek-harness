@@ -77,7 +77,7 @@ export function buildSnapshot(nodes: readonly AxNode[], options: {
           ref: `${options.epoch}-e${collected.length}`,
           role,
           name,
-          ...rawValue !== undefined ? { value: secret ? '<redacted>' : String(rawValue) } : {},
+          ...rawValue !== undefined ? { value: secret ? '<redacted>' : rawValue } : {},
           ...node.backendDOMNodeId !== undefined ? { backendNodeId: node.backendDOMNodeId } : {},
         })
       }
@@ -118,9 +118,11 @@ export function resolveRef(ref: string, snapshot: BrowserSnapshot): SnapshotNode
 
 function isSecret(role: string, name: string, node: AxNode): boolean {
   if (SECRET_NAME.test(name)) return true
-  const described = node.properties?.some(property =>
-    (property.name === 'sensitive' || property.name === 'autocomplete')
-    && String(property.value?.value ?? '').match(/password|one-time|cc-|tel|email|pin/i) !== null,
-  )
+  const described = node.properties?.some((property) => {
+    const value: unknown = property.value?.value
+    return (property.name === 'sensitive' || property.name === 'autocomplete')
+      && typeof value === 'string'
+      && /password|one-time|cc-|tel|email|pin/i.test(value)
+  })
   return described === true && SECRET_ROLES.has(role)
 }

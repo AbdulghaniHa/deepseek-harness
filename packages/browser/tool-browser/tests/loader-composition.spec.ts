@@ -96,6 +96,7 @@ describe('tool-browser real Loader composition through cordis.yml', () => {
   it('registers browser tools and lists tabs through a fake provider', async () => {
     const ctx = await boot(['    approval: never'])
     expect(ctx.tools.schemas().map(schema => schema.name)).toContain('browser_tabs')
+    expect(ctx.tools.schemas().map(schema => schema.name)).toContain('browser_network')
     const result = await ctx.tools.execute({
       signal: new AbortController().signal,
       callId: ToolCallId('tabs'),

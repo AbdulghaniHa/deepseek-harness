@@ -84,6 +84,7 @@ export async function nodeCenter(cdp: CdpClient, backendNodeId: number): Promise
   }
   const content = box.model?.content
   if (content === undefined || content.length < 8) return undefined
+  /* v8 ignore next -- a box model carries four corners, so the length guard above makes every accessed index present. */
   const n = (i: number): number => content[i] ?? 0
   return {
     x: (n(0) + n(2) + n(4) + n(6)) / 4,

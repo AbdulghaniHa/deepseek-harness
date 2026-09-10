@@ -2754,6 +2754,10 @@ export interface Config {
   evaluateTimeoutMs?: number
   /** Register the raw `browser_cdp` escape hatch. Defaults to false. */
   allowRawCdp?: boolean
+  /** Upper bound on requests buffered per tab before the oldest is dropped. */
+  networkMaxRequests?: number
+  /** Upper bound on bytes of one response body returned by `browser_network_body`. */
+  networkMaxBodyBytes?: number
   /** Cooperative timeout budget (ms) for the other browser tools. */
   timeoutMs?: number
 }
@@ -2762,7 +2766,7 @@ export interface Config {
 export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
 ```
 
-来源： [`packages/browser/tool-browser/src/index.ts:47`](../packages/browser/tool-browser/src/index.ts)
+来源： [`packages/browser/tool-browser/src/index.ts:62`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-computer-use"></a>
 

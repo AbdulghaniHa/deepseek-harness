@@ -17,7 +17,16 @@ export { approveBrowserAction } from './approval.ts'
 export type { BrowserApprovalMode, BrowserApprover } from './approval.ts'
 export { cdpClient, clickAt, nodeCenter, pageIdentity, typeText } from './cdp.ts'
 export type { CdpClient } from './cdp.ts'
-export { browserMetaFromValue, formatSnapshot, presentBrowserCall, presentBrowserResult } from './present.ts'
+export { boundResponseBody, createNetworkCapture } from './network.ts'
+export type { NetworkBodyResult, NetworkCapture, NetworkCaptureOptions, NetworkRequestEntry } from './network.ts'
+export {
+  browserMetaFromValue,
+  formatNetworkBody,
+  formatNetworkList,
+  formatSnapshot,
+  presentBrowserCall,
+  presentBrowserResult,
+} from './present.ts'
 export type { BrowserToolMeta } from './present.ts'
 export { BROWSER_PROMPT } from './prompt.ts'
 export { SNAPSHOT_REF, buildSnapshot, resolveRef } from './snapshot.ts'
@@ -43,6 +52,12 @@ export const DEFAULT_SCREENSHOT_MAX_BYTES = 1_000_000
 /** Default cooperative timeout for `browser_evaluate`. */
 export const DEFAULT_EVALUATE_TIMEOUT_MS = 15_000
 
+/** Default ceiling on buffered requests per tab. */
+export const DEFAULT_NETWORK_MAX_REQUESTS = 200
+
+/** Default ceiling on a response body inlined by `browser_network_body`. */
+export const DEFAULT_NETWORK_MAX_BODY_BYTES = 100_000
+
 /** Plugin config: enablement, approval mode, snapshot/screenshot caps, and the raw-CDP hatch. */
 export interface Config {
   /** Register the `browser_*` tools. Defaults to true. */
@@ -57,6 +72,10 @@ export interface Config {
   evaluateTimeoutMs?: number
   /** Register the raw `browser_cdp` escape hatch. Defaults to false. */
   allowRawCdp?: boolean
+  /** Upper bound on requests buffered per tab before the oldest is dropped. */
+  networkMaxRequests?: number
+  /** Upper bound on bytes of one response body returned by `browser_network_body`. */
+  networkMaxBodyBytes?: number
   /** Cooperative timeout budget (ms) for the other browser tools. */
   timeoutMs?: number
 }
@@ -68,6 +87,8 @@ export const Config: z<Config> = z.object({
   screenshotMaxBytes: z.number().default(DEFAULT_SCREENSHOT_MAX_BYTES),
   evaluateTimeoutMs: z.number().default(DEFAULT_EVALUATE_TIMEOUT_MS),
   allowRawCdp: z.boolean().default(false),
+  networkMaxRequests: z.number().default(DEFAULT_NETWORK_MAX_REQUESTS),
+  networkMaxBodyBytes: z.number().default(DEFAULT_NETWORK_MAX_BODY_BYTES),
   timeoutMs: z.number().default(DEFAULT_BROWSER_TOOL_TIMEOUT_MS),
 })
 
@@ -91,6 +112,8 @@ export function apply(ctx: Context, config: Config): void {
   assertPositiveInteger('snapshotMaxNodes', resolved.snapshotMaxNodes)
   assertPositiveInteger('screenshotMaxBytes', resolved.screenshotMaxBytes)
   assertPositiveInteger('evaluateTimeoutMs', resolved.evaluateTimeoutMs)
+  assertPositiveInteger('networkMaxRequests', resolved.networkMaxRequests)
+  assertPositiveInteger('networkMaxBodyBytes', resolved.networkMaxBodyBytes)
   assertPositiveInteger('timeoutMs', resolved.timeoutMs)
   if (!resolved.enabled) return
   ctx.systemPrompt.section({
