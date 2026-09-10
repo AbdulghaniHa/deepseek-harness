@@ -691,7 +691,6 @@ function fakeProcess(handler: (method: string, params: unknown, id: number) => u
     settle = resolve
   })
   return {
-    pid: 1,
     stdin,
     stdout,
     terminate: () => { settle({ exitCode: 0, signal: null }) },

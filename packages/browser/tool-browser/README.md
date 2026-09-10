@@ -9,9 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-With `dsh-tool-browser`, the model can drive the user's real Chrome through `browser_*` tools backed by `ctx.browser`. Choose it when the model should use existing tabs, cookies, and logins; prefer `web_fetch` for a public page that does not need a logged-in session. Tools stay visible even when the selected provider is disconnected: execution then fails with a structured `BrowserError`. Side-effecting tools ask `ctx.approval` per the `approval` config. `dsh-base` mounts the row with `enabled: false` until a product turns the tools on after `dsh browser install`.
-
-Opening, navigating, and snapshot-returning interactions include a bounded viewport screenshot in result metadata for the chat preview. Preview failures preserve the completed action and record a preview error. Preview images do not enter the Native model response; canonical PTC values can include the image data. Browser clicks use target-specific CDP input without bringing the tab forward. An open reports the page identity from its own capture when Chrome has not committed the tab's URL yet. The browser service owns preview limits; `screenshotMaxBytes` applies to the explicit screenshot tool. `browser_network` and `browser_network_body` read the HTTP traffic of an attached tab: capture starts at a tab's first `browser_network` call, entries stay in a bounded per-tab buffer, and response bodies are bounded before they reach the model.
+With `dsh-tool-browser`, the model drives the user's real Chrome through `browser_*` tools backed by `ctx.browser`: navigate, snapshot, click, type, and read HTTP traffic. Choose it when the model should use existing tabs, cookies, and logins; prefer `web_fetch` for a public page that needs no session. Tools stay visible while the provider is disconnected and then fail with a structured `BrowserError`, and side-effecting calls ask `ctx.approval`. Preview and network captures are bounded, and preview images never enter the model response.
 
 ## Table of Contents
 
@@ -131,7 +129,7 @@ Prefix-stable while definitions, `allowRawCdp`, and visibility are unchanged. Co
 
 #### What the model sees
 
-Successful interaction tools return a compact accessibility snapshot (`tabId`, `url`, `title`, `text`, `truncated`) so the model sees the page consequence in one round trip. Stale refs fail loudly. Password, OTP, and payment field values are redacted. Oversized screenshots stay text/meta instead of becoming image blocks.
+Successful interaction tools return a compact accessibility snapshot (`tabId`, `url`, `title`, `text`, `truncated`) so the model sees the page consequence in one round trip. Stale refs fail loudly. Password, OTP, and payment field values are redacted. Oversized screenshots stay text/meta instead of becoming image blocks. Opening, navigating, and snapshot-returning interactions include a bounded viewport screenshot in result metadata for the chat preview. Preview failures preserve the completed action and record a preview error. Preview images do not enter the Native model response; canonical PTC values can include the image data. Browser clicks use target-specific CDP input without bringing the tab forward. An open reports the page identity from its own capture when Chrome has not committed the tab's URL yet.
 
 #### Token effect
 

@@ -9,9 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-任何插件或工具都可以通过 `dsh-browser`（`ctx.browser`）列出标签页、附加并发送 CDP，而无需绑定 Chrome Native Messaging。提供方作为后端插入，服务挑选一个可用提供方，因此调用方不必跟踪背后运行的传输。在构建浏览器工具或其他后端时选择它；随附的面向模型工具（`dsh-tool-browser`）会自动挂载它。服务本身不发起 Chrome 调用，也不注册面向模型的工具：必须先挂载提供方，标签页或 CDP 调用才能运行。
-
-聊天预览捕获已附加的标签页，不激活 Chrome。`previewMaxBytes` 限制解码后的 PNG 字节数（默认 `1000000`）；`previewIntervalMs` 设置可见实时预览的刷新间隔（默认 `2000` 毫秒）。同一标签页的捕获串行执行。会话作用域的 `browser.preview` 和 `browser.reveal` Remote 方法要求精确的存活 Agent 附加关系；reveal 委托给可选的提供方 `revealTab` 方法，仅用于用户明确操作。
+任何插件或工具都可以通过 `dsh-browser`（`ctx.browser`）列出标签页、附加并发送 CDP，而无需绑定 Chrome Native Messaging。提供方作为后端插入，服务挑选一个可用提供方，因此调用方不必跟踪背后运行的传输。在构建浏览器工具或其他后端时选择它；随附的面向模型工具（`dsh-tool-browser`）会自动挂载它。服务本身不发起 Chrome 调用，也不注册面向模型的工具，因此必须先挂载提供方，标签页或 CDP 调用才能运行。聊天预览捕获已附加的标签页，不激活 Chrome，并受 `previewMaxBytes` 限制。
 
 ## 目录
 
@@ -49,6 +47,8 @@ kind: "package-reference"
 | `previewIntervalMs` | `2000` | 可见实时预览的刷新间隔，单位毫秒 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-browser)是每个已接受字段及其 JSDoc 的穷尽来源。
+
+聊天预览绝不激活 Chrome。同一标签页的捕获串行执行。会话作用域的 `browser.preview` 和 `browser.reveal` Remote 方法要求精确的存活 Agent 附加关系；reveal 委托给可选的提供方 `revealTab` 方法，仅用于用户明确操作。
 
 ### 提供方选择
 

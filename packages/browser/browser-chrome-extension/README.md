@@ -9,9 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package is the shipped Chrome backend for `ctx.browser`. A thin MV3 extension talks to a Node native host over Chrome Native Messaging; the host listens on `$DSH_HOME/browser/host.sock` (or a Windows named pipe) and multiplexes dsh clients. The plugin registers provider id `chrome-extension` and connects lazily, reconnecting on the next call after the socket drops; a missing host is `BROWSER_NOT_CONNECTED`. Choose it when the model should drive the user's real, logged-in Chrome. `dsh browser install` writes the native-host manifest and prints the Load-unpacked path until a Web Store id exists.
-
-Agent tabs open inactive. Grouped opens for one Agent reuse the preceding agent-created tab’s group and window while that tab exists; a closed predecessor starts a new group. Creating or grouping tabs does not focus Chrome. Explicit reveal activates the tab and focuses its window. Chrome’s debugging banner remains visible.
+Drive the user’s real, logged-in Chrome from the model. A thin MV3 extension talks to a Node native host over Chrome Native Messaging; the host listens on `$DSH_HOME/browser/host.sock` (or a Windows named pipe) and multiplexes dsh clients. Choose it when existing tabs, cookies, and logins should be used. Provider id `chrome-extension` connects lazily and reconnects on the next call after the socket drops; a missing host is `BROWSER_NOT_CONNECTED`. `dsh browser install` writes the native-host manifest and prints the Load-unpacked path until a Web Store id exists. Chrome’s debugging banner stays visible.
 
 ## Table of Contents
 
@@ -43,6 +41,8 @@ Load the browser service and this provider, then run `dsh browser install --brow
 | `extensionId` | unpacked placeholder | Pinned in install manifests |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-browser-chrome-extension) is the exhaustive source for every accepted field and its JSDoc.
+
+Agent tabs open inactive. Grouped opens for one Agent reuse the preceding agent-created tab’s group and window while that tab exists; a closed predecessor starts a new group. Creating or grouping tabs does not focus Chrome. Explicit reveal activates the tab and focuses its window. Chrome’s debugging banner remains visible.
 
 ### Failures and recovery
 

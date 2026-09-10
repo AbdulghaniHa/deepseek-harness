@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包是 `ctx.computer` 已发布的本地后端。它通过 `ctx.subprocess` 启动 `lib/host.js`，并在 stdio 上使用换行分隔的 JSON-RPC。helper 通过 `@simular-ai/simulang-js` v13 原生 addon 驱动桌面，该依赖声明为 `optionalDependencies`，因此 `pnpm install` 会为 macOS、Linux glibc 和 Windows 拉取预编译二进制；二进制缺失时 helper 使用不带无障碍树的操作系统回退。插件注册提供方 id `local` 并惰性启动 helper；崩溃对应 `COMPUTER_HOST_CRASHED`。当模型应驱动与 `dsh` 同一台机器上的 GUI 应用时选择它。`dsh computer doctor` 在不启动 Cordis 的情况下打印权限状态。
+本包是 `ctx.computer` 已发布的本地后端。它通过 `ctx.subprocess` 启动 `lib/host.js`，并在 stdio 上使用换行分隔的 JSON-RPC。helper 通过 `@simular-ai/simulang-js` v13 原生 addon 驱动桌面，该依赖声明为 `optionalDependencies`，因此 `pnpm install` 会为 macOS、Linux glibc 和 Windows 拉取预编译二进制；二进制缺失时 helper 使用不带无障碍树的操作系统回退。提供方 id `local` 惰性启动 helper；崩溃对应 `COMPUTER_HOST_CRASHED`。当模型应驱动与 `dsh` 同一台机器上的 GUI 应用时选择它。`dsh computer doctor` 在不启动 Cordis 的情况下打印权限状态。
 
 ## 目录
 

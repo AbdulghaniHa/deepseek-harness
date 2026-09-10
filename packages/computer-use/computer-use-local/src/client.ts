@@ -12,7 +12,6 @@ import { decodeLines, encodeLine, isRpcResponse, rpcRequest, type ComputerRpcRes
 
 /** Minimal process handle the client needs from `ctx.subprocess` or a test fake. */
 export interface ComputerHostProcess {
-  readonly pid: number
   readonly stdin: Writable | undefined
   readonly stdout: Readable | undefined
   terminate(): void

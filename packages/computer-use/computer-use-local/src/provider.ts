@@ -23,7 +23,6 @@ import {
   type ComputerWindow,
   type ComputerWindowId,
 } from '@deepseek-ai/dsh-computer-use'
-import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { ComputerHostClient, resolveHostArgv } from './client.ts'
 import { hostBackendFlags } from './flags.ts'
 
@@ -73,15 +72,12 @@ export class LocalComputerProvider implements ComputerProvider {
   constructor(ctx: Context, options: LocalComputerProviderOptions) {
     this.client = options.client ?? new ComputerHostClient({
       requestTimeoutMs: options.requestTimeoutMs,
-      spawn: (argv) => {
-        const handle: SubprocessHandle = ctx.subprocess.spawn({
-          argv,
-          cwd: process.cwd(),
-          stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
-          graceMs: options.graceMs,
-        })
-        return handle
-      },
+      spawn: argv => ctx.subprocess.spawn({
+        argv,
+        cwd: process.cwd(),
+        stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+        graceMs: options.graceMs,
+      }),
       argv: [...resolveHostArgv(), ...hostBackendFlags(options.windowCacheMs)],
     })
   }

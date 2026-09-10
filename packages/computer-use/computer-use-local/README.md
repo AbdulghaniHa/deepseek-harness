@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package is the shipped local backend for `ctx.computer`. It spawns `lib/host.js` through `ctx.subprocess` and speaks newline-delimited JSON-RPC over stdio. The helper drives the desktop through the `@simular-ai/simulang-js` v13 native addon, declared as an `optionalDependencies` entry so `pnpm install` fetches the prebuilt binary for macOS, Linux glibc, and Windows; when the binary is absent the helper uses an OS fallback without accessibility trees. The plugin registers provider id `local` and starts the helper lazily; a crash is `COMPUTER_HOST_CRASHED`. Choose it when the model should drive GUI apps on the same machine as `dsh`. `dsh computer doctor` prints permission state without booting Cordis.
+This package is the shipped local backend for `ctx.computer`. It spawns `lib/host.js` through `ctx.subprocess` and speaks newline-delimited JSON-RPC over stdio. The helper drives the desktop through the `@simular-ai/simulang-js` v13 native addon, declared as an `optionalDependencies` entry so `pnpm install` fetches the prebuilt binary for macOS, Linux glibc, and Windows; when the binary is absent the helper uses an OS fallback without accessibility trees. Provider id `local` starts the helper lazily; a crash is `COMPUTER_HOST_CRASHED`. Choose it when the model should drive GUI apps on the same machine as `dsh`. `dsh computer doctor` prints permission state without booting Cordis.
 
 ## Table of Contents
 

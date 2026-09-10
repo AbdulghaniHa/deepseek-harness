@@ -9,9 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-有了 `dsh-tool-browser`，模型可以通过由 `ctx.browser` 支撑的 `browser_*` 工具驱动用户真实的 Chrome。当模型应使用已有标签页、cookie 和登录态时选择它；对于不需要登录会话的公开页面，优先使用 `web_fetch`。即使所选提供方断开，工具仍保持可见：执行时以结构化 `BrowserError` 失败。有副作用的工具按 `approval` 配置询问 `ctx.approval`。`dsh-base` 以 `enabled: false` 挂载该行，直到产品在 `dsh browser install` 之后打开这些工具。
-
-打开、导航和返回快照的交互在结果元数据中包含受大小限制的视口截图，供聊天预览使用。预览失败保留已完成的操作并记录预览错误。预览图像不进入 Native 模型响应；规范 PTC 值可以包含图像数据。浏览器点击使用目标专属的 CDP 输入，不将标签页置于前台。当 Chrome 尚未提交标签页 URL 时，打开操作报告其截图所得的页面身份。浏览器服务拥有预览限制；`screenshotMaxBytes` 适用于显式截图工具。`browser_network` 和 `browser_network_body` 读取已附加标签页的 HTTP 流量：捕获从某个标签页的首次 `browser_network` 调用开始，条目保存在受上限约束的按标签页缓冲区中，响应体在到达模型之前已完成限界。
+有了 `dsh-tool-browser`，模型可以通过由 `ctx.browser` 支撑的 `browser_*` 工具驱动用户真实的 Chrome：导航、快照、点击、输入和读取 HTTP 流量。当模型应使用已有标签页、cookie 和登录态时选择它；对于不需要登录会话的公开页面，优先使用 `web_fetch`。即使提供方断开，工具仍保持可见，执行时以结构化 `BrowserError` 失败，有副作用的调用会询问 `ctx.approval`。预览与网络捕获都受上限约束，预览图像不进入模型响应。
 
 ## 目录
 
@@ -131,7 +129,7 @@ Use browser_* tools to drive the user's real Chrome (existing tabs, cookies, and
 
 #### 模型看到什么
 
-成功的交互工具返回一份紧凑无障碍快照（`tabId`、`url`、`title`、`text`、`truncated`），因此模型能在一轮中看到页面后果。过期 ref 会大声失败。密码、OTP 和支付字段值会被脱敏。过大的截图保持文本/元数据，而不是变成图片块。
+成功的交互工具返回一份紧凑无障碍快照（`tabId`、`url`、`title`、`text`、`truncated`），因此模型能在一轮中看到页面后果。过期 ref 会大声失败。密码、OTP 和支付字段值会被脱敏。过大的截图保持文本/元数据，而不是变成图片块。打开、导航和返回快照的交互在结果元数据中包含受大小限制的视口截图，供聊天预览使用。预览失败保留已完成的操作并记录预览错误。预览图像不进入 Native 模型响应；规范 PTC 值可以包含图像数据。浏览器点击使用目标专属的 CDP 输入，不将标签页置于前台。当 Chrome 尚未提交标签页 URL 时，打开操作报告其截图所得的页面身份。
 
 #### Token 影响
 

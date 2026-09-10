@@ -9,9 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包是 `ctx.browser` 随附的 Chrome 后端。瘦 MV3 扩展通过 Chrome Native Messaging 与 Node native host 通信；host 在 `$DSH_HOME/browser/host.sock`（或 Windows named pipe）上监听并复用多个 dsh 客户端。插件注册提供方 id `chrome-extension`，惰性连接并在 socket 断开后的下一次调用重连；缺失的 host 是 `BROWSER_NOT_CONNECTED`。当模型应驱动用户真实、已登录的 Chrome 时选择它。`dsh browser install` 写入 native-host 清单，并在出现 Web Store id 之前打印 Load unpacked 路径。
-
-Agent 标签页在后台打开。同一 Agent 的分组打开操作在前一个 Agent 创建的标签页仍存在时复用其分组和窗口；前一个标签页关闭后创建新分组。创建或分组标签页不会使 Chrome 获得焦点。明确的显示操作会激活标签页并聚焦其窗口。Chrome 的调试横幅保持可见。
+从模型驱动用户真实、已登录的 Chrome。瘦 MV3 扩展通过 Chrome Native Messaging 与 Node native host 通信；host 在 `$DSH_HOME/browser/host.sock`（或 Windows named pipe）上监听并复用多个 dsh 客户端。当需要使用已有的标签页、cookie 与登录态时选择它。提供方 id `chrome-extension` 惰性连接，并在 socket 断开后的下一次调用重连；缺失的 host 是 `BROWSER_NOT_CONNECTED`。`dsh browser install` 写入 native-host 清单，并在出现 Web Store id 之前打印 Load unpacked 路径。Chrome 的调试横幅保持可见。
 
 ## 目录
 
@@ -43,6 +41,8 @@ Agent 标签页在后台打开。同一 Agent 的分组打开操作在前一个 
 | `extensionId` | 未打包占位 | 钉在安装清单中 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-browser-chrome-extension)是每个已接受字段及其 JSDoc 的穷尽来源。
+
+Agent 标签页在后台打开。同一 Agent 的分组打开操作在前一个 Agent 创建的标签页仍存在时复用其分组和窗口；前一个标签页关闭后创建新分组。创建或分组标签页不会使 Chrome 获得焦点。明确的显示操作会激活标签页并聚焦其窗口。Chrome 的调试横幅保持可见。
 
 ### 失败与恢复
 
