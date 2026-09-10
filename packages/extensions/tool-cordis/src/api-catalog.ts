@@ -640,7 +640,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'preview\') async preview(agent: Agent, tabId: BrowserTabIdBrand, signal?: AbortSignal): Promise<BrowserPreview>',
-        description: 'Capture an attached tab for a chat preview without activating Chrome.',
+        description: 'Capture an attached tab for a chat preview without activating Chrome. `url` and `title` describe the tab after the capture, so a tab that had not committed its URL yet reports the page it landed on.',
         parameters: [{ name: 'agent', description: 'exact live Agent whose attachment authorizes the capture.' }, { name: 'tabId', description: 'attached tab to preview.' }, { name: 'signal', description: 'cancellation forwarded to Chrome.' }],
         returns: 'bounded PNG data and capture time; oversized captures throw.',
       },
