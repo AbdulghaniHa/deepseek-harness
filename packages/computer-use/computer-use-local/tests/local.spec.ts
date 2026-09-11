@@ -82,6 +82,7 @@ function fakeBackend(overrides: Partial<DesktopBackend> = {}): DesktopBackend {
     }),
     press: () => Promise.resolve(),
     setValue: () => Promise.resolve(),
+    action: () => Promise.resolve(),
     click: () => Promise.resolve(),
     type: () => Promise.resolve(),
     key: () => Promise.resolve(),
@@ -127,6 +128,7 @@ describe('platform backend', () => {
     await expect(backend.snapshot({ windowId: ComputerWindowId('x'), maxNodes: 1 })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     await expect(backend.press('n')).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     await expect(backend.setValue('n', 'v')).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
+    await expect(backend.action({ handle: 'n', action: 'activate' })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     await expect(backend.scroll({ x: 0, y: 0, direction: 'down', amount: 1 })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     await expect(backend.move({ x: 0, y: 0 })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     await expect(backend.drag({ fromX: 0, fromY: 0, toX: 1, toY: 1 })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
@@ -195,6 +197,8 @@ interface FakeNodeSpec {
   name?: string
   value?: string
   enabled?: boolean
+  selected?: boolean
+  expanded?: boolean
   box?: { left: number; top: number; width: number; height: number } | null
   refId?: number | null
   children?: FakeNodeSpec[]
@@ -209,6 +213,8 @@ function fakeNode(spec: FakeNodeSpec): SimulangNode {
     name: spec.name ?? '',
     value: spec.value ?? '',
     isEnabled: spec.enabled ?? true,
+    ...spec.selected !== undefined ? { isSelected: spec.selected } : {},
+    ...spec.expanded !== undefined ? { isExpanded: spec.expanded } : {},
     boundingBox: spec.box === undefined ? { left: 0, top: 0, width: 10, height: 10 } : spec.box,
     refId: spec.refId === undefined ? null : spec.refId,
     children: (spec.children ?? []).map(fakeNode),
@@ -370,9 +376,9 @@ describe('simulang adapter', () => {
           { role: 1, name: 'OK', refId: 1 },
           { role: 2, name: 'Name', value: 'Ada', refId: 2, box: null },
           { role: 3, name: 'Secret', value: 'hunter2', refId: 3 },
-          { role: 4, name: 'Bold', refId: 4, enabled: false },
-          { role: 5, name: 'Tab', refId: 5 },
-          { role: 6, name: 'Pick', refId: 6 },
+          { role: 4, name: 'Bold', refId: 4, enabled: false, selected: true },
+          { role: 5, name: 'Tab', refId: 5, expanded: false },
+          { role: 6, name: 'Pick', refId: 6, expanded: true },
           { role: 7, name: 'label', refId: null },
           { role: 8, name: 'Logo', refId: 8 },
         ],
@@ -385,11 +391,13 @@ describe('simulang adapter', () => {
     const root = snap.nodes[0]!
     expect(root).toMatchObject({ handle: '0@7:Notes', role: 'window', supportsPress: false, supportsSetValue: false })
     const [ok, name, secret, bold, tab, pick, label, logo] = root.children!
-    expect(ok).toMatchObject({ role: 'button', supportsPress: true, supportsSetValue: false, states: [] })
+    expect(ok).toMatchObject({ role: 'button', supportsPress: true, supportsSetValue: false, states: ['enabled'] })
     expect(name).toMatchObject({ role: 'textbox', value: 'Ada', supportsSetValue: true, bounds: { x: 0, y: 0, width: 0, height: 0 } })
     expect(secret).toMatchObject({ role: 'password', secure: true, supportsSetValue: true })
     expect(secret?.value).toBeUndefined()
-    expect(bold).toMatchObject({ role: 'checkbox', states: ['disabled'], supportsPress: true })
+    expect(bold).toMatchObject({ role: 'checkbox', states: ['disabled', 'selected'], supportsPress: true })
+    expect(tab).toMatchObject({ states: expect.arrayContaining(['collapsed']) })
+    expect(pick).toMatchObject({ states: expect.arrayContaining(['expanded']) })
     expect(label).toMatchObject({ handle: '', supportsPress: false, supportsSetValue: false })
     expect(logo?.supportsPress).toBe(true)
     await backend.press(ok!.handle)
@@ -398,11 +406,20 @@ describe('simulang adapter', () => {
     await backend.press(pick!.handle)
     await backend.press(root.handle)
     await backend.setValue(name!.handle, 'Grace')
-    expect(fake.calls).toEqual(expect.arrayContaining(['tree 7:Notes', 'activate 1', 'toggle 4', 'select 5', 'expandCollapse 6', 'activate 0', 'setValue 2 Grace']))
+    await backend.action({ handle: ok!.handle, action: 'activate' })
+    await backend.action({ handle: name!.handle, action: 'setValue' })
+    expect(fake.calls).toEqual(expect.arrayContaining(['tree 7:Notes', 'activate 1', 'toggle 4', 'select 5', 'expandCollapse 6', 'activate 0', 'setValue 2 Grace', 'activate 1', 'setValue 2 ']))
     const capped = await backend.snapshot({ windowId, maxNodes: 3 })
     expect(capped.truncated).toBe(true)
     expect(capped.nodes[0]?.children).toHaveLength(2)
     expect((await backend.snapshot({ windowId, maxNodes: 0 })).nodes).toEqual([])
+    const shallow = await backend.snapshot({ windowId, maxNodes: 50, maxDepth: 0 })
+    expect(shallow.truncated).toBe(true)
+    expect(shallow.nodes[0]?.children).toBeUndefined()
+    const subtree = await backend.snapshot({ windowId, maxNodes: 50, rootHandle: ok!.handle })
+    expect(subtree.nodes[0]?.handle).toBe(ok!.handle)
+    expect((await backend.snapshot({ windowId, maxNodes: 50, maxDepth: 0, rootHandle: ok!.handle })).truncated).toBe(false)
+    await expect(backend.snapshot({ windowId, maxNodes: 1, rootHandle: 'missing@7:Notes' })).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
     await expect(backend.press('1@7:Other')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
     await expect(backend.press('nope')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
     await expect(backend.press('@7:Notes')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
@@ -516,7 +533,7 @@ describe('JSON-RPC dispatch', () => {
     expect(await handleComputerMethod(backend, 'launchApp', { name: 'Notes' })).toMatchObject({ name: 'Notes' })
     expect(await handleComputerMethod(backend, 'focusWindow', { windowId: 'w1' })).toBeNull()
     expect(await handleComputerMethod(backend, 'windowAtPoint', { x: 1, y: 2 })).toMatchObject({ id: 'w1' })
-    expect(await handleComputerMethod(backend, 'snapshot', { windowId: 'w1', query: 'button' })).toMatchObject({ title: 'Notes' })
+    expect(await handleComputerMethod(backend, 'snapshot', { windowId: 'w1', query: 'button', maxDepth: 1, rootHandle: 'n' })).toMatchObject({ title: 'Notes' })
     const shot = await handleComputerMethod(backend, 'screenshot', {
       windowId: 'w1',
       displayId: 1,
@@ -525,12 +542,16 @@ describe('JSON-RPC dispatch', () => {
     expect(Buffer.from(shot.pngBase64, 'base64')[0]).toBe(137)
     expect(await handleComputerMethod(backend, 'press', { handle: 'n' })).toBeNull()
     expect(await handleComputerMethod(backend, 'setValue', { handle: 'n', text: 'v' })).toBeNull()
-    expect(await handleComputerMethod(backend, 'click', { x: 1, y: 2, button: 'right', count: 2 })).toBeNull()
+    expect(await handleComputerMethod(backend, 'action', { handle: 'n', action: 'toggle' })).toBeNull()
+    expect(await handleComputerMethod(backend, 'action', { handle: 'n', action: 'setValue', value: 'x' })).toBeNull()
+    await expect(handleComputerMethod(backend, 'action', { handle: 'n', action: 'nope' })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
+    expect(await handleComputerMethod(backend, 'click', { x: 1, y: 2, button: 'right', count: 2, modifiers: ['shift'] })).toBeNull()
     expect(await handleComputerMethod(backend, 'type', { text: 'hi' })).toBeNull()
     expect(await handleComputerMethod(backend, 'key', { key: 'a', modifiers: ['shift'], repeat: 2 })).toBeNull()
-    expect(await handleComputerMethod(backend, 'scroll', { x: 0, y: 0, direction: 'up', amount: 2 })).toBeNull()
+    expect(await handleComputerMethod(backend, 'scroll', { x: 0, y: 0, direction: 'up', amount: 2, modifiers: ['alt'] })).toBeNull()
     expect(await handleComputerMethod(backend, 'move', { x: 3, y: 4 })).toBeNull()
     expect(await handleComputerMethod(backend, 'drag', { fromX: 0, fromY: 0, toX: 1, toY: 1 })).toBeNull()
+    expect(await handleComputerMethod(backend, 'drag', { fromX: 0, fromY: 0, toX: 1, toY: 1, modifiers: ['shift'] })).toBeNull()
     expect(await handleComputerMethod(backend, 'clipboardRead', undefined)).toBe('clip')
     expect(await handleComputerMethod(backend, 'clipboardWrite', { text: 'z' })).toBeNull()
     await expect(handleComputerMethod(backend, 'nope', {})).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
@@ -865,6 +886,7 @@ describe('local provider + plugin', () => {
     expect((await provider.screenshot({})).png).toEqual(new Uint8Array([1, 2]))
     await provider.press('n')
     await provider.setValue('n', 'v')
+    await provider.action({ handle: 'n', action: 'activate' })
     await provider.click({ x: 0, y: 0 })
     await provider.type('x')
     await provider.key({ key: 'a' })

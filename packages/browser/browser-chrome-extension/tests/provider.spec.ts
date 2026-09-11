@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import BrowserRuntime, { BrowserTabId } from '@deepseek-ai/dsh-browser'
+import BrowserRuntime, { BrowserDownloadId, BrowserTabId } from '@deepseek-ai/dsh-browser'
 import { apply, Config, ChromeExtensionProvider, CHROME_EXTENSION_PROVIDER_ID } from '@deepseek-ai/dsh-browser-chrome-extension'
 import { decodeFrames, encodeFrame, rpcFailure, rpcNotify, rpcRequest, rpcSuccess } from '../src/protocol/index.ts'
 import { BrowserHostClient } from '../src/socket.ts'
@@ -134,6 +134,10 @@ describe('ChromeExtensionProvider', () => {
       clientId: 'test',
     })
     await expect(provider.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' }))
+    await Promise.all([
+      expect(provider.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' })),
+      expect(provider.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' })),
+    ])
   })
 })
 
@@ -148,6 +152,9 @@ describe('plugin apply', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-browser-offline-'))
     apply(ctx, Config({ socketPath: join(root, 'missing.sock'), requestTimeoutMs: 1000, connectTimeoutMs: 10, tabGroupTitle: 'X' }))
     await expect(ctx.browser.listTabs()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' }))
+    const ctxDefault = new Context()
+    await ctxDefault.plugin(BrowserRuntime, {})
+    apply(ctxDefault, { connectTimeoutMs: 10, requestTimeoutMs: 1000 })
     const ctx2 = new Context()
     await ctx2.plugin(BrowserRuntime, {})
     apply(ctx2, Config({
@@ -197,7 +204,19 @@ describe('ChromeExtensionProvider methods', () => {
         } else if (request.method === 'readingList.add') {
           socket.write(encodeFrame(rpcSuccess(request.id, { url: 'https://r2', title: 'R2', hasBeenRead: false })))
         } else if (request.method === 'downloads.list') {
-          socket.write(encodeFrame(rpcSuccess(request.id, [{ id: 1, url: 'https://d', filename: 'f', state: 'complete' }])))
+          socket.write(encodeFrame(rpcSuccess(request.id, [
+            { id: 1, url: 'https://d', filename: 'f', state: 'complete' },
+            { id: 2, url: 'https://e', filename: 'g', state: 'downloading' },
+          ])))
+        } else if (request.method === 'downloads.get') {
+          const id = String((request.params as { id?: unknown })?.id ?? '')
+          if (id === '1') {
+            socket.write(encodeFrame(rpcSuccess(request.id, { id: 1, url: 'https://d', filename: 'f', state: 'complete' })))
+          } else if (id === '2') {
+            socket.write(encodeFrame(rpcSuccess(request.id, undefined)))
+          } else {
+            socket.write(encodeFrame(rpcSuccess(request.id, null)))
+          }
         }
       }
     })
@@ -215,7 +234,13 @@ describe('ChromeExtensionProvider methods', () => {
     await expect(provider.createBookmark({ title: 'N', url: 'https://n' })).resolves.toMatchObject({ title: 'N' })
     await expect(provider.listReadingList()).resolves.toHaveLength(1)
     await expect(provider.addReadingList({ title: 'R2', url: 'https://r2' })).resolves.toMatchObject({ title: 'R2' })
-    await expect(provider.listDownloads()).resolves.toHaveLength(1)
+    await expect(provider.listDownloads()).resolves.toMatchObject([
+      { id: '1', state: 'complete' },
+      { id: '2', state: 'in_progress' },
+    ])
+    await expect(provider.getDownload(BrowserDownloadId('1'))).resolves.toMatchObject({ id: '1', state: 'complete' })
+    await expect(provider.getDownload(BrowserDownloadId('2'))).resolves.toBeUndefined()
+    await expect(provider.getDownload(BrowserDownloadId('missing'))).resolves.toBeUndefined()
     await provider.listTabs()
   })
 
@@ -237,10 +262,12 @@ describe('ChromeExtensionProvider methods', () => {
         n += 1
         if (n === 1) socket.write(encodeFrame(rpcSuccess(request.id, [])))
         else if (n === 2) socket.write(encodeFrame(rpcFailure(request.id, -32000, 'No tab with id 9')))
+        else if (n === 3) socket.write(encodeFrame(rpcFailure(request.id, -32000, 'TAB_GONE')))
         else socket.write(encodeFrame(rpcFailure(request.id, -32000, 'bad cdp')))
       }
     })
     await first
+    await expect(provider.attach(BrowserTabId('9'))).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_TAB_GONE' }))
     await expect(provider.attach(BrowserTabId('9'))).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_TAB_GONE' }))
     await expect(provider.cdp({ tabId: BrowserTabId('1'), method: 'X' }))
       .rejects.toThrow(expect.objectContaining({ code: 'BROWSER_PROTOCOL' }))
@@ -274,6 +301,21 @@ describe('ChromeExtensionProvider methods', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     await expect(provider.listTabs()).resolves.toHaveLength(1)
     expect(sockets).toHaveLength(2)
+  })
+
+  it('maps a dropped in-flight request to BROWSER_NOT_CONNECTED', async () => {
+    const { path, onClient } = await listen()
+    const provider = new ChromeExtensionProvider({
+      socketPath: path,
+      connectTimeoutMs: 1000,
+      requestTimeoutMs: 1000,
+      tabGroupTitle: 'DeepSeek',
+      clientId: 'test',
+    })
+    const pending = provider.listTabs()
+    const socket = await onClient
+    socket.destroy()
+    await expect(pending).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_CONNECTED' }))
   })
 })
 

@@ -6,6 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import {
   ComputerError,
+  type ComputerActionRequest,
   type ComputerApp,
   type ComputerAppId,
   type ComputerCapability,
@@ -137,6 +138,10 @@ export class LocalComputerProvider implements ComputerProvider {
 
   async setValue(handle: string, text: string, signal?: AbortSignal): Promise<void> {
     await this.client.call('setValue', { handle, text }, signal)
+  }
+
+  async action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void> {
+    await this.client.call('action', request, signal)
   }
 
   async click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void> {

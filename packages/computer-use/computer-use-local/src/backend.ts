@@ -4,6 +4,7 @@
  */
 
 import type {
+  ComputerActionRequest,
   ComputerApp,
   ComputerAppId,
   ComputerCapability,
@@ -34,6 +35,7 @@ export interface DesktopBackend {
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>

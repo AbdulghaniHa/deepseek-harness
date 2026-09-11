@@ -29,6 +29,7 @@ interface ComputerProvider {
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
@@ -62,6 +63,7 @@ interface ComputerSnapshotNode {
   readonly states: readonly string[]
   readonly supportsPress: boolean
   readonly supportsSetValue: boolean
+  readonly actions: readonly ComputerA11yAction[]
   readonly secure: boolean
   readonly children?: readonly ComputerSnapshotNode[]
 }
@@ -127,6 +129,15 @@ capabilities(): readonly ComputerCapability[]
  * @returns accessibility, screen-recording, and input-injection state.
  */
 async permissions(signal?: AbortSignal): Promise<ComputerPermissions>
+
+/**
+ * Read-only discovery of the selected provider. Distinguishes a cheap
+ * `available()` check from a bounded live permissions probe. Never throws
+ * for a missing, ambiguous, or down provider.
+ * @param signal - optional cancellation forwarded to the live probe.
+ * @returns configured vs live status, advertised operations, and recovery.
+ */
+async status(signal?: AbortSignal): Promise<ComputerStatus>
 
 /**
  * List running applications through the selected provider.
@@ -229,6 +240,15 @@ async press(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: A
  * @param signal - optional cancellation forwarded to the provider.
  */
 async setValue(owner: Agent, windowId: ComputerWindowId, handle: string, text: string, signal?: AbortSignal): Promise<void>
+
+/**
+ * Invoke a named accessibility action on a node in a granted window.
+ * @param owner - exact Agent that owns the grant.
+ * @param windowId - window that owns the node.
+ * @param request - handle, action, and optional setValue text.
+ * @param signal - optional cancellation forwarded to the provider.
+ */
+async action(owner: Agent, windowId: ComputerWindowId, request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
 
 /**
  * Synthesized click after deny, grant, and hit-test checks.

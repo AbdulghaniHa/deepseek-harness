@@ -7,6 +7,7 @@ import ComputerRuntime, {
   ComputerWindowId,
   type ComputerApp,
   type ComputerProvider,
+  type ComputerSnapshotNode,
   type ComputerWindow,
 } from '@deepseek-ai/dsh-computer-use'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -78,6 +79,7 @@ function makeProvider(extras: Partial<ComputerProvider> = {}): ComputerProvider 
         states: [],
         supportsPress: true,
         supportsSetValue: false,
+        actions: ['activate'],
         secure: false,
         children: [{
           handle: 'n2',
@@ -88,6 +90,7 @@ function makeProvider(extras: Partial<ComputerProvider> = {}): ComputerProvider 
           states: [],
           supportsPress: false,
           supportsSetValue: true,
+          actions: ['setValue'],
           secure: true,
         }],
       }],
@@ -101,6 +104,7 @@ function makeProvider(extras: Partial<ComputerProvider> = {}): ComputerProvider 
     }),
     press: () => Promise.resolve(),
     setValue: () => Promise.resolve(),
+    action: () => Promise.resolve(),
     click: () => Promise.resolve(),
     type: () => Promise.resolve(),
     key: () => Promise.resolve(),
@@ -121,12 +125,16 @@ async function mount(opts: {
   attachments?: boolean
   provider?: ComputerProvider
   llm?: boolean
+  computerConfig?: ConstructorParameters<typeof ComputerRuntime>[1]
+  skipProvider?: boolean
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(ComputerRuntime)
-  ctx.computer.registerProvider(opts.provider ?? makeProvider())
+  await ctx.plugin(ComputerRuntime, opts.computerConfig ?? {})
+  if (opts.skipProvider !== true) {
+    ctx.computer.registerProvider(opts.provider ?? makeProvider())
+  }
   if (opts.approval) {
     ctx.provide('approval', { request: (req: { toolName: string }) => opts.approval!(req) })
   }
@@ -181,6 +189,7 @@ describe('snapshot builder', () => {
         states: [],
         supportsPress: true,
         supportsSetValue: false,
+        actions: ['activate'],
         secure: false,
         children: [{
           handle: 'n2',
@@ -191,6 +200,7 @@ describe('snapshot builder', () => {
           states: [],
           supportsPress: false,
           supportsSetValue: true,
+          actions: ['setValue'],
           secure: true,
         }],
       }],
@@ -216,6 +226,7 @@ describe('snapshot builder', () => {
         states: [],
         supportsPress: false,
         supportsSetValue: false,
+        actions: [],
         secure: false,
       }],
     }, { epoch: 1, maxNodes: 10 })
@@ -232,6 +243,7 @@ describe('snapshot builder', () => {
         states: [],
         supportsPress: false,
         supportsSetValue: true,
+        actions: ['setValue'],
         secure: false,
       }],
     }, { epoch: 1, maxNodes: 10 })
@@ -247,6 +259,7 @@ describe('snapshot builder', () => {
         states: [],
         supportsPress: false,
         supportsSetValue: false,
+        actions: [],
         secure: false,
         children: [{
           handle: 'a',
@@ -256,6 +269,7 @@ describe('snapshot builder', () => {
           states: [],
           supportsPress: true,
           supportsSetValue: false,
+          actions: ['activate'],
           secure: false,
         }, {
           handle: 'b',
@@ -265,12 +279,69 @@ describe('snapshot builder', () => {
           states: [],
           supportsPress: true,
           supportsSetValue: false,
+          actions: ['activate'],
           secure: false,
         }],
       }],
     }, { epoch: 1, maxNodes: 1, query: 'button' })
     expect(capped.nodes).toHaveLength(1)
     expect(capped.truncated).toBe(true)
+    const deep = buildComputerSnapshot(tree, { epoch: 1, maxNodes: 10, maxDepth: 0 })
+    expect(deep.nodes).toHaveLength(1)
+    expect(deep.truncated).toBe(true)
+    const subtree = buildComputerSnapshot(tree, { epoch: 1, maxNodes: 10, rootHandle: 'n2' })
+    expect(subtree.nodes[0]?.handle).toBe('n2')
+    expect(() => buildComputerSnapshot(tree, { epoch: 1, maxNodes: 10, rootHandle: 'missing' }))
+      .toThrow(/unknown snapshot handle/)
+    const inferred = buildComputerSnapshot({
+      ...tree,
+      nodes: [{
+        handle: 'x',
+        role: 'button',
+        name: 'Go',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        states: [],
+        supportsPress: true,
+        supportsSetValue: false,
+        secure: false,
+      } as unknown as ComputerSnapshotNode, {
+        handle: 'y',
+        role: 'textbox',
+        name: 'Field',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        states: [],
+        supportsPress: false,
+        supportsSetValue: true,
+        secure: false,
+      } as unknown as ComputerSnapshotNode, {
+        handle: 'z',
+        role: 'checkbox',
+        name: 'On',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        states: [],
+        supportsPress: false,
+        supportsSetValue: false,
+        actions: ['toggle'],
+        secure: false,
+      }],
+    }, { epoch: 1, maxNodes: 10 })
+    expect(inferred.nodes.map(node => node.actions)).toEqual([['activate'], ['setValue'], ['toggle']])
+    expect(inferred.nodes[2]?.supportsPress).toBe(true)
+    const leaf = buildComputerSnapshot({
+      ...tree,
+      nodes: [{
+        handle: 'leaf',
+        role: 'button',
+        name: 'Only',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        states: [],
+        supportsPress: true,
+        supportsSetValue: false,
+        actions: ['activate'],
+        secure: false,
+      }],
+    }, { epoch: 1, maxNodes: 10, maxDepth: 0 })
+    expect(leaf.truncated).toBe(false)
   })
 })
 
@@ -279,10 +350,20 @@ describe('presenters', () => {
     expect(presentComputerCall('X', 'fetch').title).toBe('X')
     expect(presentComputerResult('Y', 'z').title).toBe('Y')
     expect(presentComputerResult('Y').content).toBeUndefined()
-    expect(computerMetaFromValue({ app: 'Notes', windowTitle: 'T', windowId: 'w1' })).toEqual({
+    expect(computerMetaFromValue({
       app: 'Notes',
       windowTitle: 'T',
       windowId: 'w1',
+      observationId: 'w1:1',
+      observationError: 'boom',
+      operation: 'click',
+    })).toEqual({
+      app: 'Notes',
+      windowTitle: 'T',
+      windowId: 'w1',
+      observationId: 'w1:1',
+      observationError: 'boom',
+      operation: 'click',
     })
     expect(computerMetaFromValue({})).toEqual({})
     expect(formatComputerSnapshot({ app: 'A', windowTitle: 'T', text: '- button', truncated: true })).toContain('truncated')
@@ -388,6 +469,9 @@ describe('computer tools', () => {
     expect(String((snap.value as { text: string }).text)).toContain('[1-e0]')
     const clicked = await call('computer_click', { windowId: 'w1', ref: '1-e0' })
     expect(clicked.isError).toBe(false)
+    const observed = await call('computer_observe', { windowId: 'w1', screenshot: true })
+    expect(observed.isError).toBe(false)
+    expect(observed.value).not.toHaveProperty('attachmentId')
   })
 
   it('types, keys, scrolls, drags, moves, waits, and uses the clipboard', async () => {
@@ -408,6 +492,139 @@ describe('computer tools', () => {
     expect((await call('computer_clipboard', { action: 'read' })).value).toMatchObject({ text: 'clip' })
     expect((await call('computer_clipboard', { action: 'write', text: 'z' })).isError).toBe(false)
     expect((await call('computer_clipboard', { action: 'write' })).isError).toBe(true)
+  })
+
+  it('reports computer_status, observes, and invokes advertised actions', async () => {
+    const { call } = await mount({ vision: true })
+    const status = await call('computer_status', {})
+    expect(status.isError).toBe(false)
+    expect(status.value).toMatchObject({ available: true, connection: 'live' })
+    const observed = await call('computer_observe', { windowId: 'w1', screenshot: true })
+    expect(observed.isError).toBe(false)
+    expect(observed.value).toMatchObject({ observationId: expect.any(String), attachmentId: 'att-1' })
+    const acted = await call('computer_action', { windowId: 'w1', ref: '1-e0', action: 'activate' })
+    expect(acted.isError).toBe(false)
+    const snap = await call('computer_snapshot', { windowId: 'w1', maxDepth: 0 })
+    const ref = /\[(\d+-e0)\]/.exec(String((snap.value as { text: string }).text))?.[1]
+    expect((await call('computer_action', { windowId: 'w1', ref, action: 'toggle' })).isError).toBe(true)
+    expect((await call('computer_action', { windowId: 'w1', ref, action: 'setValue' })).isError).toBe(true)
+    expect((await call('computer_action', { windowId: 'w1', ref, action: 'nope' })).isError).toBe(true)
+  })
+
+  it('rejects screenshot-space clicks after geometry changes and supports wait/drag refs', async () => {
+    let bounds = { x: 0, y: 0, width: 800, height: 600 }
+    const { call } = await mount({
+      vision: true,
+      provider: makeProvider({
+        listWindows: () => Promise.resolve([{
+          id: ComputerWindowId('w1'),
+          appId: ComputerAppId('notes'),
+          title: 'Notes',
+          bounds,
+          focused: true,
+        }]),
+        snapshot: request => Promise.resolve({
+          windowId: request.windowId,
+          appId: ComputerAppId('notes'),
+          title: 'Notes',
+          truncated: false,
+          nodes: [{
+            handle: 'n1',
+            role: 'checkbox',
+            name: 'Bold',
+            bounds: { x: 10, y: 10, width: 20, height: 10 },
+            states: ['enabled', 'selected'],
+            supportsPress: true,
+            supportsSetValue: false,
+            actions: ['toggle', 'select'],
+            secure: false,
+          }],
+        }),
+      }),
+    })
+    const observed = await call('computer_observe', { windowId: 'w1' })
+    const observationId = (observed.value as { observationId: string }).observationId
+    bounds = { x: 10, y: 10, width: 800, height: 600 }
+    expect((await call('computer_click', { windowId: 'w1', x: 5, y: 5, observationId })).isError).toBe(true)
+    bounds = { x: 0, y: 0, width: 800, height: 600 }
+    const snap = await call('computer_snapshot', { windowId: 'w1' })
+    const ref = /\[(\d+-e0)\]/.exec(String((snap.value as { text: string }).text))?.[1]
+    expect((await call('computer_wait_for', { windowId: 'w1', ref, state: 'selected' })).value).toMatchObject({ matched: true })
+    expect((await call('computer_wait_for', { windowId: 'w1', text: 'missing', gone: true, timeoutMs: 1 })).value)
+      .toMatchObject({ matched: true })
+    expect((await call('computer_drag', {
+      windowId: 'w1',
+      from: { ref },
+      to: { x: 2, y: 2 },
+      space: 'screen',
+    })).isError).toBe(false)
+    const afterDrag = await call('computer_snapshot', { windowId: 'w1' })
+    const fresh = /\[(\d+-e0)\]/.exec(String((afterDrag.value as { text: string }).text))?.[1]
+    expect((await call('computer_action', { windowId: 'w1', ref: fresh, action: 'toggle' })).isError).toBe(false)
+    expect((await call('computer_drag', { windowId: 'w1', from: {}, to: { x: 1, y: 1 }, space: 'screen' })).isError).toBe(true)
+  })
+
+  it('covers snapshot refs, setValue, modifiers, and mismatched observation ids', async () => {
+    const { call } = await mount({ vision: true })
+    expect((await call('computer_action', { windowId: 'w1', ref: '1-e0', action: 'activate' })).isError).toBe(true)
+    expect((await call('computer_drag', { windowId: 'w1', from: { ref: '1-e0' }, to: { x: 1, y: 1 }, space: 'screen' })).isError).toBe(true)
+    const snap = await call('computer_snapshot', { windowId: 'w1' })
+    const button = /\[(\d+-e0)\]/.exec(String((snap.value as { text: string }).text))?.[1]
+    const field = /\[(\d+-e1)\]/.exec(String((snap.value as { text: string }).text))?.[1]
+    expect((await call('computer_action', { windowId: 'w1', ref: field, action: 'setValue', value: 'Ada' })).isError).toBe(false)
+    const after = await call('computer_snapshot', { windowId: 'w1' })
+    const nextButton = /\[(\d+-e0)\]/.exec(String((after.value as { text: string }).text))?.[1]
+    expect((await call('computer_snapshot', { windowId: 'w1', ref: nextButton, maxDepth: 1 })).isError).toBe(false)
+    const afterSubtree = await call('computer_snapshot', { windowId: 'w1' })
+    const next = /\[(\d+-e0)\]/.exec(String((afterSubtree.value as { text: string }).text))?.[1]
+    expect((await call('computer_click', {
+      windowId: 'w1',
+      ref: next,
+      modifiers: ['shift'],
+    })).isError).toBe(false)
+    await call('computer_observe', { windowId: 'w1', screenshot: false })
+    expect((await call('computer_click', { windowId: 'w1', x: 1, y: 1, observationId: 'stale' })).isError).toBe(true)
+    expect((await call('computer_wait_for', { windowId: 'w1', state: 'busy', timeoutMs: 1 })).value)
+      .toMatchObject({ matched: true })
+    const failed = await mount({
+      provider: makeProvider({
+        permissions: () => Promise.reject(new ComputerError('helper down', 'COMPUTER_HOST_CRASHED')),
+      }),
+    })
+    expect((await failed.call('computer_status', {})).value).toMatchObject({ connection: 'probe-failed' })
+  })
+
+  it('keeps a completed action when the follow-up observation fails', async () => {
+    let failSnapshot = false
+    const { call } = await mount({
+      provider: makeProvider({
+        snapshot: (request) => {
+          if (failSnapshot) return Promise.reject(new ComputerError('tree gone', 'COMPUTER_HOST_CRASHED'))
+          return Promise.resolve({
+            windowId: request.windowId,
+            appId: ComputerAppId('notes'),
+            title: 'Notes',
+            truncated: false,
+            nodes: [{
+              handle: 'n1',
+              role: 'button',
+              name: 'OK',
+              bounds: { x: 10, y: 10, width: 20, height: 10 },
+              states: [],
+              supportsPress: true,
+              supportsSetValue: false,
+              actions: ['activate'],
+              secure: false,
+            }],
+          })
+        },
+      }),
+    })
+    await call('computer_snapshot', { windowId: 'w1' })
+    failSnapshot = true
+    const clicked = await call('computer_click', { windowId: 'w1', ref: '1-e0' })
+    expect(clicked.isError).toBe(false)
+    expect(clicked.value).toMatchObject({ observationError: expect.stringContaining('tree gone') })
   })
 
   it('clicks coordinates, maps screenshot space, and refuses a screenshot on a text-only route', async () => {
@@ -524,13 +741,14 @@ describe('computer tools', () => {
             states: [],
             supportsPress: false,
             supportsSetValue: false,
+            actions: [],
             secure: false,
           }],
         }),
       }),
     })
     await call('computer_snapshot', { windowId: 'w1' })
-    expect((await call('computer_click', { windowId: 'w1', ref: '1-e0', button: 'right', count: 2 })).isError).toBe(false)
+    expect((await call('computer_click', { windowId: 'w1', ref: '1-e0', button: 'right', count: 2, modifiers: ['shift'] })).isError).toBe(false)
     const afterRight = await call('computer_snapshot', { windowId: 'w1' })
     const middleRef = /\[(\d+-e0)\]/.exec(String((afterRight.value as { text: string }).text))?.[1]
     expect((await call('computer_click', { windowId: 'w1', ref: middleRef, button: 'middle' })).isError).toBe(false)
@@ -564,10 +782,13 @@ describe('computer tools', () => {
   it('covers presenters, gone windows, unresolved routes, and screenshot mapping', async () => {
     const { ctx, call } = await mount({ vision: true, config: { approval: 'never', screenshotMaxWidth: 50 } })
     const presenterArgs: Record<string, Record<string, unknown>> = {
+      computer_status: {},
       computer_apps: {},
       computer_launch: { app: 'Notes' },
       computer_focus: { windowId: 'w1' },
       computer_snapshot: { windowId: 'w1' },
+      computer_observe: { windowId: 'w1' },
+      computer_action: { windowId: 'w1', ref: '1-e0', action: 'activate' },
       computer_screenshot: { windowId: 'w1' },
       computer_click: { windowId: 'w1', ref: '1-e0' },
       computer_type: { windowId: 'w1', text: 'x' },
@@ -603,6 +824,11 @@ describe('computer tools', () => {
         x: 1,
         y: 2,
         key: 'a',
+        operations: ['snapshot'],
+        unsupportedOperations: ['clipboardRead'],
+        issues: [{ code: 'X', message: 'm', recovery: 'r' }],
+        connection: 'live',
+        available: true,
       } as JsonValue)
       tool?.output.render(args, {
         apps: [{
@@ -624,8 +850,18 @@ describe('computer tools', () => {
         width: 10,
         height: 10,
         scale: 1,
+        observationError: 'observe failed',
+        operations: [],
+        unsupportedOperations: [],
+        issues: [],
       } as JsonValue)
-      tool?.output.render(args, { action: 'read', apps: [] } as JsonValue)
+      tool?.output.render(args, {
+        action: 'read',
+        apps: [],
+        operations: ['snapshot'],
+        unsupportedOperations: [],
+        issues: [],
+      } as JsonValue)
       tool?.output.presentationMeta?.(args, { app: 'Notes', windowTitle: 'Notes', windowId: 'w1' } as JsonValue)
     }
     ctx.tools.get('computer_click')?.presentCall?.({ windowId: 'w1', x: 1, y: 2 })
@@ -677,5 +913,76 @@ describe('computer tools', () => {
       agent: { id: SessionId('owner'), session: Session.create(SessionId('owner')), options: {} } as unknown as Agent,
     })
     expect(unresolved.isError).toBe(true)
+
+    const fresh = await mount({ vision: true })
+    expect((await fresh.call('computer_snapshot', { windowId: 'w1', ref: '1-e0' })).isError).toBe(true)
+    expect((await fresh.call('computer_wait_for', { windowId: 'w1', ref: '1-e0', timeoutMs: 1 })).isError).toBe(false)
+    await fresh.call('computer_snapshot', { windowId: 'w1' })
+    expect((await fresh.call('computer_screenshot', { windowId: 'w1' })).isError).toBe(false)
+    expect((await fresh.call('computer_action', { windowId: 'w1', ref: '1-e0', action: 'expandCollapse' })).isError).toBe(true)
+    expect((await fresh.call('computer_action', { windowId: 'w1', ref: '1-e1', action: 'setValue' })).isError).toBe(true)
+    expect((await fresh.call('computer_observe', { windowId: 'w1', maxDepth: 1, ref: '1-e0' })).isError).toBe(false)
+    expect((await fresh.call('computer_click', { windowId: 'w1', x: 2, y: 2, modifiers: ['alt'] })).isError).toBe(false)
+    expect((await fresh.call('computer_scroll', { windowId: 'w1', x: 1, y: 1, direction: 'down', amount: 1, modifiers: ['ctrl'] })).isError).toBe(false)
+    await fresh.call('computer_snapshot', { windowId: 'w1' })
+    expect((await fresh.call('computer_drag', {
+      windowId: 'w1',
+      from: { x: 1, y: 1 },
+      to: { x: 2, y: 2 },
+      space: 'screen',
+      modifiers: ['shift'],
+    })).isError).toBe(false)
+    expect((await fresh.call('computer_wait_for', { windowId: 'w1', state: 'selected', timeoutMs: 1 })).value)
+      .toMatchObject({ matched: false })
+    expect((await fresh.call('computer_wait_for', { windowId: 'w1', text: 'never', timeoutMs: -1 })).value)
+      .toMatchObject({ matched: false })
+    const noProvider = await mount({ skipProvider: true })
+    expect((await noProvider.call('computer_status', {})).value).toMatchObject({ available: false })
+    const configured = await mount({ computerConfig: { provider: 'fake' } })
+    expect((await configured.call('computer_status', {})).value).toMatchObject({ configuredProvider: 'fake' })
+    const bare = await mount({
+      provider: makeProvider({
+        snapshot: () => Promise.reject('bare'),
+      }),
+    })
+    const afterBare = await bare.call('computer_click', { windowId: 'w1', x: 1, y: 1, space: 'screen' })
+    expect(afterBare.isError).toBe(false)
+    expect(afterBare.value).toMatchObject({ observationError: 'bare' })
+    const noAttach = await mount({ vision: true, attachments: false })
+    expect((await noAttach.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
+    const huge = await mount({
+      vision: true,
+      config: { approval: 'never', screenshotMaxBytes: 1, screenshotMaxWidth: 10 },
+    })
+    expect((await huge.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
+    const scaled = await mount({
+      vision: true,
+      config: { approval: 'never', screenshotMaxWidth: 50 },
+    })
+    expect((await scaled.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
+    expect((await scaled.call('computer_screenshot', {})).isError).toBe(false)
+    const emptyActs = await mount({
+      provider: makeProvider({
+        snapshot: request => Promise.resolve({
+          windowId: request.windowId,
+          appId: ComputerAppId('notes'),
+          title: 'Notes',
+          truncated: false,
+          nodes: [{
+            handle: 'n1',
+            role: 'generic',
+            name: 'Box',
+            bounds: { x: 0, y: 0, width: 1, height: 1 },
+            states: [],
+            supportsPress: false,
+            supportsSetValue: false,
+            actions: [],
+            secure: false,
+          }],
+        }),
+      }),
+    })
+    await emptyActs.call('computer_snapshot', { windowId: 'w1' })
+    expect((await emptyActs.call('computer_action', { windowId: 'w1', ref: '1-e0', action: 'activate' })).isError).toBe(true)
   })
 })

@@ -4,8 +4,15 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import BrowserRuntime, {
   BrowserAttachmentId,
+  BrowserDownloadId,
   BrowserError,
+  BrowserFrameId,
   BrowserTabId,
+  browserConnectionState,
+  browserProbeIssue,
+  operationsForBrowserCapabilities,
+  recoveryForBrowserCode,
+  unsupportedOperationsForBrowserCapabilities,
   type BrowserCdpEvent,
   type BrowserProvider,
   type BrowserTab,
@@ -227,8 +234,9 @@ describe('BrowserRuntime attachments', () => {
     browser.registerProvider(makeProvider('chrome', available))
     const owner = makeAgent('a')
     await browser.attach(owner, BrowserTabId('1'))
+    await browser.attach(owner, BrowserTabId('2'))
     await browser.closeTab(owner, BrowserTabId('1'))
-    expect(browser.listAttachments(owner)).toEqual([])
+    expect(browser.listAttachments(owner).map(item => item.tabId)).toEqual([BrowserTabId('2')])
     await expect(browser.cdp(owner, { tabId: BrowserTabId('1'), method: 'Page.enable' }))
       .rejects.toThrow(expect.objectContaining({ code: 'BROWSER_NOT_ATTACHED' }))
   })
@@ -290,6 +298,7 @@ describe('BrowserRuntime facets', () => {
     await expect(browser.addReadingList({ title: 't', url: 'https://example.com' }))
       .rejects.toThrow(expect.objectContaining({ code: 'BROWSER_FACET_UNAVAILABLE' }))
     await expect(browser.listDownloads()).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_FACET_UNAVAILABLE' }))
+    await expect(browser.getDownload(BrowserDownloadId('1'))).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_FACET_UNAVAILABLE' }))
   })
 
   it('delegates optional facets when the provider implements them', async () => {
@@ -300,7 +309,7 @@ describe('BrowserRuntime facets', () => {
       createBookmark: item => Promise.resolve({ id: '2', ...item }),
       listReadingList: () => Promise.resolve([{ url: 'https://r', title: 'r', hasBeenRead: false }]),
       addReadingList: item => Promise.resolve({ ...item, hasBeenRead: false }),
-      listDownloads: () => Promise.resolve([{ id: 1, url: 'https://d', filename: 'f', state: 'complete' }]),
+      listDownloads: () => Promise.resolve([{ id: BrowserDownloadId('1'), url: 'https://d', filename: 'f', state: 'complete' }]),
     }))
     await expect(browser.historySearch('https://h')).resolves.toEqual([
       { url: 'https://h', title: 't', lastVisitTime: 1 },
@@ -314,8 +323,24 @@ describe('BrowserRuntime facets', () => {
     await expect(browser.addReadingList({ title: 'x', url: 'https://x' }))
       .resolves.toEqual({ title: 'x', url: 'https://x', hasBeenRead: false })
     await expect(browser.listDownloads()).resolves.toEqual([
-      { id: 1, url: 'https://d', filename: 'f', state: 'complete' },
+      { id: BrowserDownloadId('1'), url: 'https://d', filename: 'f', state: 'complete' },
     ])
+    await expect(browser.getDownload(BrowserDownloadId('1'))).resolves.toEqual({
+      id: BrowserDownloadId('1'), url: 'https://d', filename: 'f', state: 'complete',
+    })
+    await expect(browser.getDownload(BrowserDownloadId('missing'))).resolves.toBeUndefined()
+  })
+
+  it('delegates getDownload when the provider implements it', async () => {
+    const { browser } = await mount()
+    browser.registerProvider(makeProvider('chrome', available, {
+      listDownloads: () => Promise.resolve([]),
+      getDownload: id => Promise.resolve(id === BrowserDownloadId('1')
+        ? { id: BrowserDownloadId('1'), url: 'https://d', filename: 'f', state: 'complete' }
+        : undefined),
+    }))
+    await expect(browser.getDownload(BrowserDownloadId('1'))).resolves.toMatchObject({ filename: 'f' })
+    await expect(browser.getDownload(BrowserDownloadId('missing'))).resolves.toBeUndefined()
   })
 })
 
@@ -355,6 +380,19 @@ describe('chat preview ownership', () => {
     await expect(browser.preview(owner, BrowserTabId('1')))
       .resolves.toMatchObject({ url: 'https://example.com/', title: 'Example Domain' })
     await ctx.fiber.dispose()
+    let emptyReads = 0
+    const { browser: browser2, ctx: ctx2 } = await mount()
+    browser2.registerProvider(makeProvider('chrome', true, {
+      cdp: () => Promise.resolve({ data: 'AAAA' }),
+      listTabs: async () => {
+        emptyReads += 1
+        return emptyReads === 1 ? [{ ...tab('1'), url: '', title: '' }] : []
+      },
+    }))
+    const owner2 = makeAgent('preview-empty')
+    await browser2.attach(owner2, BrowserTabId('1'))
+    await expect(browser2.preview(owner2, BrowserTabId('1'))).resolves.toMatchObject({ url: '', title: '' })
+    await ctx2.fiber.dispose()
   })
 
   it('rejects oversized, missing, and malformed captures and closed tabs', async () => {
@@ -494,5 +532,67 @@ describe('chat preview ownership', () => {
     await expect(browser.openTab(owner, { url: 'https://after', group: true }))
       .resolves.toMatchObject({ tab: { url: 'https://after' } })
     await ctx.fiber.dispose()
+  })
+})
+
+describe('status', () => {
+  it('never throws when no provider is registered', async () => {
+    const { browser } = await mount()
+    const status = await browser.status()
+    expect(status.available).toBe(false)
+    expect(status.connection).toBe('unconfigured')
+    expect(status.issues[0]?.code).toBe('BROWSER_PROVIDER_UNAVAILABLE')
+  })
+
+  it('reports configured-missing without throwing', async () => {
+    const { browser } = await mount({ provider: 'missing' })
+    browser.registerProvider(makeProvider('chrome', available))
+    const status = await browser.status()
+    expect(status.available).toBe(false)
+    expect(status.issues[0]?.code).toBe('BROWSER_PROVIDER_CONFIGURED_MISSING')
+  })
+
+  it('reports live status after a listTabs probe', async () => {
+    const { browser } = await mount({ provider: 'chrome' })
+    browser.registerProvider(makeProvider('chrome', available))
+    const status = await browser.status()
+    expect(status.connection).toBe('live')
+    expect(status.selectedProvider).toBe('chrome')
+    expect(status.configuredProvider).toBe('chrome')
+  })
+
+  it('reports probe-failed when listTabs throws', async () => {
+    const { browser } = await mount()
+    browser.registerProvider(makeProvider('chrome', available, {
+      listTabs: () => Promise.reject(new BrowserError('disconnected', 'BROWSER_NOT_CONNECTED')),
+    }))
+    const status = await browser.status()
+    expect(status.connection).toBe('probe-failed')
+    expect(status.issues[0]?.code).toBe('BROWSER_NOT_CONNECTED')
+  })
+})
+
+describe('status helpers', () => {
+  it('covers connection labels and recovery copy', () => {
+    expect(browserConnectionState(false, false, false)).toBe('unconfigured')
+    expect(browserConnectionState(true, false, false)).toBe('configured')
+    expect(BrowserFrameId('frame-1')).toBe('frame-1')
+    expect(operationsForBrowserCapabilities(['downloads'])).toContain('listDownloads')
+    expect(unsupportedOperationsForBrowserCapabilities(['tabs', 'cdp'])).toContain('listDownloads')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_UNAVAILABLE')).toContain('Mount')
+    expect(recoveryForBrowserCode('BROWSER_NOT_CONNECTED')).toContain('native host')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_CONFIGURED_MISSING')).toContain('not registered')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_CONFIGURED_MISSING', 'chrome')).toContain('chrome')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_CONFIGURED_UNAVAILABLE')).toContain('unavailable')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_CONFIGURED_UNAVAILABLE', 'chrome')).toContain('chrome')
+    expect(recoveryForBrowserCode('BROWSER_PROVIDER_AMBIGUOUS')).toContain('Multiple')
+    expect(recoveryForBrowserCode('BROWSER_FACET_UNAVAILABLE')).toContain('browser_status')
+    expect(recoveryForBrowserCode('BROWSER_FRAME_DETACHED')).toContain('browser_frames')
+    expect(recoveryForBrowserCode('BROWSER_STALE_REF')).toContain('stale')
+    expect(recoveryForBrowserCode('BROWSER_DOWNLOAD_INTERRUPTED')).toContain('interrupted')
+    expect(recoveryForBrowserCode('BROWSER_UNSUPPORTED_DRAG')).toContain('same frame')
+    expect(recoveryForBrowserCode('BROWSER_UNKNOWN')).toContain('Inspect')
+    expect(browserProbeIssue(new BrowserError('down', 'BROWSER_NOT_CONNECTED')).code).toBe('BROWSER_NOT_CONNECTED')
+    expect(browserProbeIssue('bare').message).toBe('bare')
   })
 })

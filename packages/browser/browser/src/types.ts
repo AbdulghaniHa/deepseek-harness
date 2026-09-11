@@ -16,6 +16,12 @@ export type { BrowserTabId, BrowserPreview } from './client.ts'
 /** Opaque attachment identity minted by {@link BrowserRuntime} for one owner + tab. */
 export type BrowserAttachmentId = Branded<'BrowserAttachmentId'>
 
+/** Opaque document-frame identity minted by a provider and fenced by the seam. */
+export type BrowserFrameId = Branded<'BrowserFrameId'>
+
+/** Opaque Chrome-download identity minted by a provider and fenced by the seam. */
+export type BrowserDownloadId = Branded<'BrowserDownloadId'>
+
 /**
  * Optional Chrome-API facets a provider may advertise. The seam reports the
  * selected provider's set; a missing facet fails at the call, not at load.
@@ -28,6 +34,48 @@ export type BrowserCapability =
   | 'readingList'
   | 'downloads'
   | 'notifications'
+
+/** Named browser operation a status report may list as supported or blocked. */
+export type BrowserOperation =
+  | 'listTabs'
+  | 'openTab'
+  | 'attach'
+  | 'cdp'
+  | 'historySearch'
+  | 'listBookmarks'
+  | 'listReadingList'
+  | 'listDownloads'
+
+/**
+ * Configured vs live connection for the selected provider.
+ * `configured` means `available()` succeeded; `live` means a bounded probe
+ * reached Chrome; `probe-failed` means the cheap check passed and the probe
+ * did not.
+ */
+export type BrowserConnectionState = 'unconfigured' | 'configured' | 'live' | 'probe-failed'
+
+/** One recovery-bearing issue from {@link BrowserStatus}. */
+export interface BrowserStatusIssue {
+  readonly code: string
+  readonly message: string
+  readonly recovery: string
+}
+
+/**
+ * Read-only discovery result. Distinguishes a cheap `available()` check from a
+ * bounded live probe. Never throws for a missing or disconnected provider.
+ */
+export interface BrowserStatus {
+  readonly configuredProvider?: string
+  readonly selectedProvider?: string
+  readonly registeredProviders: readonly string[]
+  readonly available: boolean
+  readonly connection: BrowserConnectionState
+  readonly capabilities: readonly BrowserCapability[]
+  readonly operations: readonly BrowserOperation[]
+  readonly unsupportedOperations: readonly BrowserOperation[]
+  readonly issues: readonly BrowserStatusIssue[]
+}
 
 /** One open tab as the seam presents it to consumers. */
 export interface BrowserTab {
@@ -48,18 +96,24 @@ export interface BrowserOpenTabRequest {
   readonly groupWithTabId?: BrowserTabId
 }
 
-/** One CDP command against an attached tab. */
+/** One CDP command against an attached tab, optionally a child debugger session. */
 export interface BrowserCdpRequest {
   readonly tabId: BrowserTabId
   readonly method: string
   readonly params?: Readonly<Record<string, unknown>>
+  /** Flattened CDP session for a child target; omitted uses the tab session. */
+  readonly sessionId?: string
+  /** Chrome debugger target id when the command must not use the tab debuggee. */
+  readonly targetId?: string
 }
 
-/** One CDP event forwarded from an attached tab. */
+/** One CDP event forwarded from an attached tab or child session. */
 export interface BrowserCdpEvent {
   readonly tabId: BrowserTabId
   readonly method: string
   readonly params: Readonly<Record<string, unknown>>
+  readonly sessionId?: string
+  readonly targetId?: string
 }
 
 /** One history hit from the optional history facet. */
@@ -84,11 +138,30 @@ export interface BrowserReadingListItem {
 }
 
 /** One download from the optional downloads facet. */
+export type BrowserDownloadState = 'in_progress' | 'interrupted' | 'complete'
+
+/** One download from the optional downloads facet. */
 export interface BrowserDownloadItem {
-  readonly id: number
+  readonly id: BrowserDownloadId
   readonly url: string
   readonly filename: string
-  readonly state: string
+  readonly state: BrowserDownloadState
+  readonly bytesReceived?: number
+  readonly totalBytes?: number
+  readonly exists?: boolean
+  readonly error?: string
+  readonly filePath?: string
+}
+
+/** One document frame in an attached tab. */
+export interface BrowserFrame {
+  readonly frameId: BrowserFrameId
+  readonly parentFrameId?: BrowserFrameId
+  readonly url: string
+  readonly name?: string
+  readonly securityOrigin?: string
+  readonly sessionId?: string
+  readonly targetId?: string
 }
 
 /**
@@ -117,6 +190,7 @@ export interface BrowserProvider {
   listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>
   addReadingList?(item: { readonly title: string; readonly url: string }, signal?: AbortSignal): Promise<BrowserReadingListItem>
   listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>
+  getDownload?(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined>
 }
 
 /** Owner plus the tab the attachment authorizes. */
@@ -129,8 +203,9 @@ export interface BrowserAttachment {
 /**
  * Typed browser error with a machine-routable, open-string `code` and chained `cause`.
  * Shared codes cover unavailable, missing, unusable, ambiguous, or duplicate
- * providers, a disconnected host, a vanished tab, a stale snapshot ref, and
- * foreign-owner attachment use. Tool execution exposes the code in structured
- * error metadata.
+ * providers, a disconnected host, a vanished tab, a detached or navigated
+ * frame, a stale snapshot ref, an unsupported drag target, an interrupted
+ * download, and foreign-owner attachment use. Tool execution exposes the code
+ * in structured error metadata.
  */
 export class BrowserError extends HarnessError {}

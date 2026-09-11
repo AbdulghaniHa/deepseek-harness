@@ -17,7 +17,16 @@ async function worker() {
     },
     tabGroups: { update: vi.fn(async () => ({})) },
     windows: { update: vi.fn(async () => ({})) },
-    debugger: { onEvent: { addListener() {} }, onDetach: { addListener() {} } },
+    debugger: {
+      onEvent: { addListener() {} },
+      onDetach: { addListener() {} },
+      attach: vi.fn(async () => {}),
+      detach: vi.fn(async () => {}),
+      sendCommand: vi.fn(async () => ({})),
+    },
+    downloads: {
+      search: vi.fn(async () => [{ id: 9, url: 'https://d', filename: '/tmp/a.zip', state: 'complete', bytesReceived: 1, totalBytes: 1, exists: true }]),
+    },
   }
   const source = await readFile(new URL('../extension/background.js', import.meta.url), 'utf8')
   const dispatch = runInNewContext(`${source}\ndispatch`, { chrome }) as (method: string, params: object) => Promise<unknown>
@@ -59,5 +68,51 @@ describe('Chrome background tab operations', () => {
     await dispatch('tabs.activate', { tabId: '1' })
     expect(chrome.tabs.update).toHaveBeenCalledWith(1, { active: true })
     expect(chrome.windows.update).toHaveBeenCalledWith(7, { focused: true })
+  })
+})
+
+describe('Chrome debugger sessions and downloads', () => {
+  it('auto-attaches flattened child targets and forwards sessionId', async () => {
+    const { chrome, dispatch } = await worker()
+    await dispatch('debugger.attach', { tabId: '1' })
+    expect(chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 1 }, '1.3')
+    expect(chrome.debugger.sendCommand).toHaveBeenCalledWith(
+      { tabId: 1 },
+      'Target.setAutoAttach',
+      { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+    )
+    await dispatch('debugger.sendCommand', { tabId: '1', method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'child' })
+    expect(chrome.debugger.sendCommand).toHaveBeenCalledWith(
+      { tabId: 1 },
+      'Runtime.evaluate',
+      { expression: '1' },
+      'child',
+    )
+    await dispatch('debugger.sendCommand', { tabId: '1', method: 'Runtime.evaluate', targetId: 't1' })
+    expect(chrome.debugger.sendCommand).toHaveBeenCalledWith(
+      { targetId: 't1' },
+      'Runtime.evaluate',
+      {},
+    )
+  })
+
+  it('projects a download by id without reading the file', async () => {
+    const { chrome, dispatch } = await worker()
+    const listed = await dispatch('downloads.list', {})
+    expect(listed).toEqual([{
+      id: '9',
+      url: 'https://d',
+      filename: '/tmp/a.zip',
+      state: 'complete',
+      bytesReceived: 1,
+      totalBytes: 1,
+      exists: true,
+      error: undefined,
+      filePath: '/tmp/a.zip',
+    }])
+    chrome.downloads.search.mockResolvedValueOnce([{ id: 9, url: 'https://d', filename: '/tmp/a.zip', state: 'complete' }])
+    await expect(dispatch('downloads.get', { id: '9' })).resolves.toMatchObject({ id: '9', filePath: '/tmp/a.zip' })
+    chrome.downloads.search.mockResolvedValueOnce([])
+    await expect(dispatch('downloads.get', { id: '8' })).resolves.toBeNull()
   })
 })

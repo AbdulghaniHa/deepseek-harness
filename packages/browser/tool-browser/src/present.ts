@@ -7,13 +7,16 @@ import type { GenericCallView, GenericResultView } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { NetworkRequestEntry } from './network.ts'
 
-/** Persisted `tool/result` meta for replay cards. */
+/** Persisted `tool/result` meta for replay cards. Bytes never belong here. */
 export interface BrowserToolMeta {
   readonly url?: string
   readonly title?: string
   readonly tabId?: string
+  readonly frameId?: string
   readonly previewError?: string
-  readonly screenshot?: string
+  readonly screenshotAttachmentId?: string
+  readonly observationError?: string
+  readonly operation?: string
 }
 
 /**
@@ -50,8 +53,11 @@ export function browserMetaFromValue(value: Record<string, unknown>): JsonValue 
     ...typeof value.url === 'string' ? { url: value.url } : {},
     ...typeof value.title === 'string' ? { title: value.title } : {},
     ...typeof value.tabId === 'string' ? { tabId: value.tabId } : {},
+    ...typeof value.frameId === 'string' ? { frameId: value.frameId } : {},
     ...typeof value.previewError === 'string' ? { previewError: value.previewError } : {},
-    ...typeof value.screenshot === 'string' ? { screenshot: value.screenshot } : {},
+    ...typeof value.screenshotAttachmentId === 'string' ? { screenshotAttachmentId: value.screenshotAttachmentId } : {},
+    ...typeof value.observationError === 'string' ? { observationError: value.observationError } : {},
+    ...typeof value.operation === 'string' ? { operation: value.operation } : {},
   }
   if (Object.keys(meta).length === 0) return {}
   return { ...meta }

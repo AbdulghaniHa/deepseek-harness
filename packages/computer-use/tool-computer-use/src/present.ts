@@ -11,6 +11,9 @@ export interface ComputerToolMeta {
   readonly app?: string
   readonly windowTitle?: string
   readonly windowId?: string
+  readonly observationId?: string
+  readonly observationError?: string
+  readonly operation?: string
 }
 
 /**
@@ -47,6 +50,9 @@ export function computerMetaFromValue(value: Record<string, unknown>): JsonValue
     ...typeof value.app === 'string' ? { app: value.app } : {},
     ...typeof value.windowTitle === 'string' ? { windowTitle: value.windowTitle } : {},
     ...typeof value.windowId === 'string' ? { windowId: value.windowId } : {},
+    ...typeof value.observationId === 'string' ? { observationId: value.observationId } : {},
+    ...typeof value.observationError === 'string' ? { observationError: value.observationError } : {},
+    ...typeof value.operation === 'string' ? { operation: value.operation } : {},
   }
   if (Object.keys(meta).length === 0) return {}
   return { ...meta }

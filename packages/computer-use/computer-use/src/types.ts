@@ -27,6 +27,59 @@ export type ComputerCapability =
   | 'clipboard'
   | 'background-actions'
 
+/** Accessibility action a captured node may advertise. */
+export type ComputerA11yAction = 'activate' | 'toggle' | 'select' | 'expandCollapse' | 'setValue'
+
+/** Named desktop operation a status report may list as supported or blocked. */
+export type ComputerOperation =
+  | 'listApps'
+  | 'listWindows'
+  | 'launchApp'
+  | 'focusWindow'
+  | 'snapshot'
+  | 'screenshot'
+  | 'action'
+  | 'click'
+  | 'type'
+  | 'key'
+  | 'scroll'
+  | 'drag'
+  | 'move'
+  | 'clipboardRead'
+  | 'clipboardWrite'
+
+/**
+ * Configured vs live connection for the selected provider.
+ * `configured` means `available()` succeeded; `live` means a bounded probe
+ * reached the helper; `probe-failed` means the cheap check passed and the
+ * probe did not.
+ */
+export type ComputerConnectionState = 'unconfigured' | 'configured' | 'live' | 'probe-failed'
+
+/** One recovery-bearing issue from {@link ComputerStatus}. */
+export interface ComputerStatusIssue {
+  readonly code: string
+  readonly message: string
+  readonly recovery: string
+}
+
+/**
+ * Read-only discovery result. Distinguishes a cheap `available()` check from a
+ * bounded live probe. Never throws for a missing or down provider.
+ */
+export interface ComputerStatus {
+  readonly configuredProvider?: string
+  readonly selectedProvider?: string
+  readonly registeredProviders: readonly string[]
+  readonly available: boolean
+  readonly connection: ComputerConnectionState
+  readonly capabilities: readonly ComputerCapability[]
+  readonly operations: readonly ComputerOperation[]
+  readonly unsupportedOperations: readonly ComputerOperation[]
+  readonly permissions?: ComputerPermissions
+  readonly issues: readonly ComputerStatusIssue[]
+}
+
 /** OS permission probe outcome for one desktop capability. */
 export type ComputerPermissionState = 'granted' | 'denied' | 'unknown' | 'not-required'
 
@@ -73,6 +126,13 @@ export interface ComputerSnapshotRequest {
   readonly windowId: ComputerWindowId
   readonly maxNodes: number
   readonly query?: string
+  /**
+   * Include nodes through this depth (root is 0). Omitted means no depth cap.
+   * Output caps do not bound the native library's full-tree traversal.
+   */
+  readonly maxDepth?: number
+  /** Walk this node as the subtree root; omitted walks the window root. */
+  readonly rootHandle?: string
 }
 
 /** One accessibility node as a provider returns it (opaque handle, no model ref). */
@@ -85,6 +145,7 @@ export interface ComputerSnapshotNode {
   readonly states: readonly string[]
   readonly supportsPress: boolean
   readonly supportsSetValue: boolean
+  readonly actions: readonly ComputerA11yAction[]
   readonly secure: boolean
   readonly children?: readonly ComputerSnapshotNode[]
 }
@@ -148,6 +209,13 @@ export interface ComputerDragRequest {
   readonly modifiers?: readonly string[]
 }
 
+/** Accessibility action against one captured node handle. */
+export interface ComputerActionRequest {
+  readonly handle: string
+  readonly action: ComputerA11yAction
+  readonly value?: string
+}
+
 /** Grant duration stored by the runtime. */
 export type ComputerGrantScope = 'once' | 'session'
 
@@ -178,6 +246,7 @@ export interface ComputerProvider {
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
@@ -192,7 +261,8 @@ export interface ComputerProvider {
  * Typed computer-use error with a machine-routable, open-string `code` and chained `cause`.
  * Shared codes cover unavailable, missing, unusable, ambiguous, or duplicate
  * providers, denied OS permissions, the fixed deny list, a missing grant, a
- * coordinate hit-test mismatch, a vanished window, a stale snapshot ref, a
- * crashed helper, and an unsupported platform facet.
+ * coordinate hit-test mismatch, changed window geometry, a vanished or
+ * ambiguous window, a stale snapshot ref, a crashed helper, an unsupported
+ * accessibility action, and an unsupported platform facet.
  */
 export class ComputerError extends HarnessError {}

@@ -60,6 +60,7 @@ const FakeComputerProvider = {
       }),
       press: () => Promise.resolve(),
       setValue: () => Promise.resolve(),
+      action: () => Promise.resolve(),
       click: () => Promise.resolve(),
       type: () => Promise.resolve(),
       key: () => Promise.resolve(),

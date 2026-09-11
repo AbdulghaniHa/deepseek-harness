@@ -61,6 +61,8 @@ export async function handleComputerMethod(
         windowId: ComputerWindowId(asString(record.windowId)),
         maxNodes: typeof record.maxNodes === 'number' ? record.maxNodes : 200,
         ...typeof record.query === 'string' ? { query: record.query } : {},
+        ...typeof record.maxDepth === 'number' ? { maxDepth: record.maxDepth } : {},
+        ...typeof record.rootHandle === 'string' ? { rootHandle: record.rootHandle } : {},
       })
     case 'screenshot': {
       const shot = await backend.screenshot({
@@ -85,12 +87,25 @@ export async function handleComputerMethod(
     case 'setValue':
       await backend.setValue(asString(record.handle), asString(record.text))
       return null
+    case 'action': {
+      const action = record.action
+      if (action !== 'activate' && action !== 'toggle' && action !== 'select' && action !== 'expandCollapse' && action !== 'setValue') {
+        throw new ComputerError(`unknown accessibility action "${String(action)}"`, 'COMPUTER_UNSUPPORTED')
+      }
+      await backend.action({
+        handle: asString(record.handle),
+        action,
+        ...typeof record.value === 'string' ? { value: record.value } : {},
+      })
+      return null
+    }
     case 'click':
       await backend.click({
         x: asNumber(record.x),
         y: asNumber(record.y),
         button: record.button === 'right' || record.button === 'middle' ? record.button : 'left',
         count: typeof record.count === 'number' ? record.count : 1,
+        ...Array.isArray(record.modifiers) ? { modifiers: record.modifiers as string[] } : {},
       })
       return null
     case 'type':
@@ -111,6 +126,7 @@ export async function handleComputerMethod(
           ? record.direction
           : 'down',
         amount: typeof record.amount === 'number' ? record.amount : 1,
+        ...Array.isArray(record.modifiers) ? { modifiers: record.modifiers as string[] } : {},
       })
       return null
     case 'move':
@@ -122,6 +138,7 @@ export async function handleComputerMethod(
         fromY: asNumber(record.fromY),
         toX: asNumber(record.toX),
         toY: asNumber(record.toY),
+        ...Array.isArray(record.modifiers) ? { modifiers: record.modifiers as string[] } : {},
       })
       return null
     case 'clipboardRead':

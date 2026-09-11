@@ -12,12 +12,19 @@ export interface CdpClient {
   send(method: string, params?: Readonly<Record<string, unknown>>): Promise<unknown>
 }
 
+/** Optional child debugger session for an OOPIF or flattened target. */
+export interface CdpSession {
+  readonly sessionId?: string
+  readonly targetId?: string
+}
+
 /**
- * Bind a CDP client to one owner + tab.
+ * Bind a CDP client to one owner + tab, optionally a child debugger session.
  * @param browser - the seam.
  * @param owner - attached agent.
  * @param tabId - attached tab.
  * @param signal - optional cancellation.
+ * @param session - flattened CDP session or target for a child frame.
  * @returns a send helper.
  */
 export function cdpClient(
@@ -25,9 +32,16 @@ export function cdpClient(
   owner: Agent,
   tabId: BrowserTabId,
   signal?: AbortSignal,
+  session?: CdpSession,
 ): CdpClient {
   return {
-    send: (method, params) => browser.cdp(owner, { tabId, method, ...params !== undefined ? { params } : {} }, signal),
+    send: (method, params) => browser.cdp(owner, {
+      tabId,
+      method,
+      ...params !== undefined ? { params } : {},
+      ...session?.sessionId !== undefined && session.sessionId.length > 0 ? { sessionId: session.sessionId } : {},
+      ...session?.targetId !== undefined && session.targetId.length > 0 ? { targetId: session.targetId } : {},
+    }, signal),
   }
 }
 
@@ -90,4 +104,21 @@ export async function nodeCenter(cdp: CdpClient, backendNodeId: number): Promise
     x: (n(0) + n(2) + n(4) + n(6)) / 4,
     y: (n(1) + n(3) + n(5) + n(7)) / 4,
   }
+}
+
+/**
+ * Drag with trusted pointer events from one viewport point to another.
+ * @param cdp - bound client for the owning frame.
+ * @param from - press point.
+ * @param to - release point.
+ */
+export async function dragAt(
+  cdp: CdpClient,
+  from: { readonly x: number; readonly y: number },
+  to: { readonly x: number; readonly y: number },
+): Promise<void> {
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1 })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y, button: 'left' })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1 })
 }

@@ -9,11 +9,14 @@ import { CONVERSATION_NS as NS } from '../../locale.ts'
 type ComputerRowProps = ToolCallViewProps & PropsLocale<'conversation'>
 
 const COMPUTER_TOOLS = [
+  'computer_status',
   'computer_apps',
   'computer_launch',
   'computer_focus',
+  'computer_observe',
   'computer_snapshot',
   'computer_screenshot',
+  'computer_action',
   'computer_click',
   'computer_type',
   'computer_press_key',

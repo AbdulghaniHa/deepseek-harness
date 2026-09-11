@@ -13,6 +13,8 @@ import {
   ComputerAppId,
   ComputerError,
   ComputerWindowId,
+  type ComputerA11yAction,
+  type ComputerActionRequest,
   type ComputerApp,
   type ComputerCapability,
   type ComputerClickRequest,
@@ -63,6 +65,8 @@ export interface SimulangNode {
   readonly name: string
   readonly value: string
   readonly isEnabled: boolean
+  readonly isSelected?: boolean
+  readonly isExpanded?: boolean
   readonly boundingBox: SimulangBox | null
   readonly children: readonly SimulangNode[]
   readonly refId: number | null
@@ -199,6 +203,8 @@ const PRESS_ACTIONS: Readonly<Record<string, PressAction>> = {
 /** Remaining node budget and the per-ref press action collected during one snapshot walk. */
 interface Walk {
   left: number
+  readonly maxDepth?: number
+  truncated: boolean
   readonly actions: Map<number, PressAction>
 }
 
@@ -435,31 +441,57 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
     return module.Button.Left
   }
 
-  const mapNode = (node: SimulangNode, windowId: ComputerWindowId, walk: Walk): ComputerSnapshotNode | undefined => {
-    if (walk.left <= 0) return undefined
+  const mapNode = (node: SimulangNode, windowId: ComputerWindowId, walk: Walk, depth: number): ComputerSnapshotNode | undefined => {
+    if (walk.left <= 0) {
+      walk.truncated = true
+      return undefined
+    }
     walk.left -= 1
     const role = module.ariaRoleToString(node.role)
     const secure = role === 'password'
     const pressAction = PRESS_ACTIONS[role]
     if (pressAction !== undefined && node.refId !== null) walk.actions.set(node.refId, pressAction)
+    const actions: ComputerA11yAction[] = [
+      ...pressAction !== undefined && node.refId !== null ? [pressAction] : [],
+      ...node.refId !== null && SET_VALUE_ROLES.has(role) ? ['setValue' as const] : [],
+    ]
     const children: ComputerSnapshotNode[] = []
-    for (const child of node.children) {
-      const mapped = mapNode(child, windowId, walk)
-      if (mapped === undefined) break
-      children.push(mapped)
+    if (walk.maxDepth === undefined || depth < walk.maxDepth) {
+      for (const child of node.children) {
+        const mapped = mapNode(child, windowId, walk, depth + 1)
+        if (mapped === undefined) break
+        children.push(mapped)
+      }
+    } else if (node.children.length > 0) {
+      walk.truncated = true
     }
+    const states = [
+      node.isEnabled ? 'enabled' : 'disabled',
+      ...node.isSelected === true ? ['selected'] : [],
+      ...node.isExpanded === true ? ['expanded'] : node.isExpanded === false ? ['collapsed'] : [],
+    ]
     return {
       handle: node.refId === null ? '' : handleOf(windowId, node.refId),
       role,
       name: node.name,
       ...secure || node.value.length === 0 ? {} : { value: node.value },
       bounds: rect(node.boundingBox),
-      states: node.isEnabled ? [] : ['disabled'],
+      states,
       supportsPress: node.refId !== null && pressAction !== undefined,
       supportsSetValue: node.refId !== null && SET_VALUE_ROLES.has(role),
+      actions,
       secure,
       ...children.length === 0 ? {} : { children },
     }
+  }
+
+  const findSimulangNode = (node: SimulangNode, windowId: ComputerWindowId, handle: string): SimulangNode | undefined => {
+    if (node.refId !== null && handleOf(windowId, node.refId) === handle) return node
+    for (const child of node.children) {
+      const found = findSimulangNode(child, windowId, handle)
+      if (found !== undefined) return found
+    }
+    return undefined
   }
 
   const requireTree = (handle: string) => {
@@ -537,15 +569,26 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
         const window = requireWindow(request.windowId)
         const tree = module.AccessibilityTree.fromWindow(window)
         const root = tree.snapshot(false)
-        const walk: Walk = { left: request.maxNodes, actions: new Map() }
-        const mapped = mapNode(root, request.windowId, walk)
+        const start = request.rootHandle === undefined
+          ? root
+          : findSimulangNode(root, request.windowId, request.rootHandle)
+        if (start === undefined) {
+          throw new ComputerError(`unknown accessibility handle "${request.rootHandle}"`, 'COMPUTER_STALE_REF')
+        }
+        const walk: Walk = {
+          left: request.maxNodes,
+          ...request.maxDepth === undefined ? {} : { maxDepth: request.maxDepth },
+          truncated: false,
+          actions: new Map(),
+        }
+        const mapped = mapNode(start, request.windowId, walk, 0)
         treesByWindow.set(request.windowId, { tree, actions: walk.actions })
         return {
           windowId: request.windowId,
           appId: appIdOf(window.pid),
           title: window.title,
           nodes: mapped === undefined ? [] : [mapped],
-          truncated: walk.left <= 0,
+          truncated: walk.truncated || walk.left <= 0,
         }
       })
     },
@@ -576,6 +619,17 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       return settle(() => {
         const { tree, refId } = requireTree(handle)
         tree.setValue(refId, text)
+      })
+    },
+
+    action(request: ComputerActionRequest): Promise<void> {
+      return settle(() => {
+        const { tree, refId } = requireTree(request.handle)
+        if (request.action === 'setValue') {
+          tree.setValue(refId, request.value ?? '')
+          return
+        }
+        tree[request.action](refId)
       })
     },
 

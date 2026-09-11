@@ -662,6 +662,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the provider\'s capability list, or an empty list when none is usable.',
       },
       {
+        signature: 'async status(signal?: AbortSignal): Promise<BrowserStatus>',
+        description: 'Read-only discovery of the selected provider. Distinguishes a cheap `available()` check from a bounded live `listTabs` probe. Never throws for a missing, ambiguous, or disconnected provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the live probe.' }],
+        returns: 'configured vs live status, advertised operations, and recovery.',
+      },
+      {
         signature: 'async historySearch(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>',
         description: 'Search browsing history through the optional history facet.',
         parameters: [{ name: 'query', description: 'history search string.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
@@ -696,6 +702,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List downloads through the optional downloads facet.',
         parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
         returns: 'download items.',
+      },
+      {
+        signature: 'async getDownload(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined>',
+        description: 'Read one download through the optional downloads facet.',
+        parameters: [{ name: 'id', description: 'branded download id from {@link listDownloads}.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the download, or undefined when Chrome no longer has it.',
       },
       {
         signature: 'listAttachments(owner: Agent): readonly BrowserAttachment[]',
@@ -865,6 +877,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'accessibility, screen-recording, and input-injection state.',
       },
       {
+        signature: 'async status(signal?: AbortSignal): Promise<ComputerStatus>',
+        description: 'Read-only discovery of the selected provider. Distinguishes a cheap `available()` check from a bounded live permissions probe. Never throws for a missing, ambiguous, or down provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the live probe.' }],
+        returns: 'configured vs live status, advertised operations, and recovery.',
+      },
+      {
         signature: 'async listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>',
         description: 'List running applications through the selected provider.',
         parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
@@ -930,6 +948,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async setValue(owner: Agent, windowId: ComputerWindowId, handle: string, text: string, signal?: AbortSignal): Promise<void>',
         description: 'Set an accessibility value on a node in a granted window.',
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'handle', description: 'provider node handle.' }, { name: 'text', description: 'replacement value.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async action(owner: Agent, windowId: ComputerWindowId, request: ComputerActionRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Invoke a named accessibility action on a node in a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'request', description: 'handle, action, and optional setValue text.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
       },
       {
         signature: 'async click(owner: Agent, windowId: ComputerWindowId, request: ComputerClickRequest, signal?: AbortSignal): Promise<void>',
@@ -4069,15 +4092,23 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'BrowserCdpEvent',
-    declaration: 'export interface BrowserCdpEvent {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params: Readonly<Record<string, unknown>>;\n}',
+    declaration: 'export interface BrowserCdpEvent {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params: Readonly<Record<string, unknown>>;\n    readonly sessionId?: string;\n    readonly targetId?: string;\n}',
   },
   {
     name: 'BrowserCdpRequest',
-    declaration: 'export interface BrowserCdpRequest {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params?: Readonly<Record<string, unknown>>;\n}',
+    declaration: 'export interface BrowserCdpRequest {\n    readonly tabId: BrowserTabId;\n    readonly method: string;\n    readonly params?: Readonly<Record<string, unknown>>;\n    readonly sessionId?: string;\n    readonly targetId?: string;\n}',
+  },
+  {
+    name: 'BrowserConnectionState',
+    declaration: 'export type BrowserConnectionState = \'unconfigured\' | \'configured\' | \'live\' | \'probe-failed\';',
   },
   {
     name: 'BrowserDownloadItem',
-    declaration: 'export interface BrowserDownloadItem {\n    readonly id: number;\n    readonly url: string;\n    readonly filename: string;\n    readonly state: string;\n}',
+    declaration: 'export interface BrowserDownloadItem {\n    readonly id: BrowserDownloadId;\n    readonly url: string;\n    readonly filename: string;\n    readonly state: BrowserDownloadState;\n    readonly bytesReceived?: number;\n    readonly totalBytes?: number;\n    readonly exists?: boolean;\n    readonly error?: string;\n    readonly filePath?: string;\n}',
+  },
+  {
+    name: 'BrowserDownloadState',
+    declaration: 'export type BrowserDownloadState = \'in_progress\' | \'interrupted\' | \'complete\';',
   },
   {
     name: 'BrowserHistoryItem',
@@ -4088,16 +4119,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BrowserOpenTabRequest {\n    readonly url: string;\n    readonly group?: boolean;\n    readonly groupWithTabId?: BrowserTabId;\n}',
   },
   {
+    name: 'BrowserOperation',
+    declaration: 'export type BrowserOperation = \'listTabs\' | \'openTab\' | \'attach\' | \'cdp\' | \'historySearch\' | \'listBookmarks\' | \'listReadingList\' | \'listDownloads\';',
+  },
+  {
     name: 'BrowserPreview',
     declaration: 'export interface BrowserPreview {\n    readonly tabId: BrowserTabId;\n    readonly url: string;\n    readonly title: string;\n    readonly screenshot: string;\n    readonly capturedAt: number;\n    readonly refreshIntervalMs: number;\n}',
   },
   {
     name: 'BrowserProvider',
-    declaration: 'export interface BrowserProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly BrowserCapability[];\n    listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>;\n    openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>;\n    revealTab?(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    cdp(request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>;\n    onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void;\n    historySearch?(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>;\n    listBookmarks?(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>;\n    createBookmark?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserBookmarkItem>;\n    listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>;\n    addReadingList?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserReadingListItem>;\n    listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>;\n}',
+    declaration: 'export interface BrowserProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly BrowserCapability[];\n    listTabs(signal?: AbortSignal): Promise<readonly BrowserTab[]>;\n    openTab(request: BrowserOpenTabRequest, signal?: AbortSignal): Promise<BrowserTab>;\n    revealTab?(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    attach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    detach(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    closeTab(tabId: BrowserTabId, signal?: AbortSignal): Promise<void>;\n    cdp(request: BrowserCdpRequest, signal?: AbortSignal): Promise<unknown>;\n    onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void;\n    historySearch?(query: string, signal?: AbortSignal): Promise<readonly BrowserHistoryItem[]>;\n    listBookmarks?(signal?: AbortSignal): Promise<readonly BrowserBookmarkItem[]>;\n    createBookmark?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserBookmarkItem>;\n    listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>;\n    addReadingList?(item: {\n        readonly title: string;\n        readonly url: string;\n    }, signal?: AbortSignal): Promise<BrowserReadingListItem>;\n    listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>;\n    getDownload?(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined>;\n}',
   },
   {
     name: 'BrowserReadingListItem',
     declaration: 'export interface BrowserReadingListItem {\n    readonly url: string;\n    readonly title: string;\n    readonly hasBeenRead: boolean;\n}',
+  },
+  {
+    name: 'BrowserStatus',
+    declaration: 'export interface BrowserStatus {\n    readonly configuredProvider?: string;\n    readonly selectedProvider?: string;\n    readonly registeredProviders: readonly string[];\n    readonly available: boolean;\n    readonly connection: BrowserConnectionState;\n    readonly capabilities: readonly BrowserCapability[];\n    readonly operations: readonly BrowserOperation[];\n    readonly unsupportedOperations: readonly BrowserOperation[];\n    readonly issues: readonly BrowserStatusIssue[];\n}',
+  },
+  {
+    name: 'BrowserStatusIssue',
+    declaration: 'export interface BrowserStatusIssue {\n    readonly code: string;\n    readonly message: string;\n    readonly recovery: string;\n}',
   },
   {
     name: 'BrowserTab',
@@ -4200,6 +4243,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CompositionRowEnablement = boolean | \'conditional\';',
   },
   {
+    name: 'ComputerA11yAction',
+    declaration: 'export type ComputerA11yAction = \'activate\' | \'toggle\' | \'select\' | \'expandCollapse\' | \'setValue\';',
+  },
+  {
+    name: 'ComputerActionRequest',
+    declaration: 'export interface ComputerActionRequest {\n    readonly handle: string;\n    readonly action: ComputerA11yAction;\n    readonly value?: string;\n}',
+  },
+  {
     name: 'ComputerApp',
     declaration: 'export interface ComputerApp {\n    readonly id: ComputerAppId;\n    readonly name: string;\n    readonly pid: number;\n    readonly bundleId?: string;\n    readonly path?: string;\n}',
   },
@@ -4210,6 +4261,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ComputerClickRequest',
     declaration: 'export interface ComputerClickRequest {\n    readonly x: number;\n    readonly y: number;\n    readonly button?: \'left\' | \'right\' | \'middle\';\n    readonly count?: number;\n    readonly modifiers?: readonly string[];\n}',
+  },
+  {
+    name: 'ComputerConnectionState',
+    declaration: 'export type ComputerConnectionState = \'unconfigured\' | \'configured\' | \'live\' | \'probe-failed\';',
   },
   {
     name: 'ComputerDragRequest',
@@ -4232,6 +4287,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ComputerLaunchRequest {\n    readonly name: string;\n}',
   },
   {
+    name: 'ComputerOperation',
+    declaration: 'export type ComputerOperation = \'listApps\' | \'listWindows\' | \'launchApp\' | \'focusWindow\' | \'snapshot\' | \'screenshot\' | \'action\' | \'click\' | \'type\' | \'key\' | \'scroll\' | \'drag\' | \'move\' | \'clipboardRead\' | \'clipboardWrite\';',
+  },
+  {
     name: 'ComputerPermissions',
     declaration: 'export interface ComputerPermissions {\n    readonly accessibility: ComputerPermissionState;\n    readonly screenRecording: ComputerPermissionState;\n    readonly inputInjection: ComputerPermissionState;\n}',
   },
@@ -4241,7 +4300,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerProvider',
-    declaration: 'export interface ComputerProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly ComputerCapability[];\n    permissions(signal?: AbortSignal): Promise<ComputerPermissions>;\n    listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>;\n    listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>;\n    launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>;\n    focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>;\n    windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>;\n    snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>;\n    screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>;\n    press(handle: string, signal?: AbortSignal): Promise<void>;\n    setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>;\n    click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>;\n    type(text: string, signal?: AbortSignal): Promise<void>;\n    key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>;\n    scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>;\n    drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>;\n    move(request: {\n        readonly x: number;\n        readonly y: number;\n    }, signal?: AbortSignal): Promise<void>;\n    clipboardR /* …truncated — full shape in source */',
+    declaration: 'export interface ComputerProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly ComputerCapability[];\n    permissions(signal?: AbortSignal): Promise<ComputerPermissions>;\n    listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>;\n    listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>;\n    launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>;\n    focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>;\n    windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>;\n    snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>;\n    screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>;\n    press(handle: string, signal?: AbortSignal): Promise<void>;\n    setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>;\n    action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>;\n    click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>;\n    type(text: string, signal?: AbortSignal): Promise<void>;\n    key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>;\n    scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>;\n    drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>;\n    move(request: {\n        readonly x: number;\n       /* …truncated — full shape in source */',
   },
   {
     name: 'ComputerRect',
@@ -4265,11 +4324,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerSnapshotNode',
-    declaration: 'export interface ComputerSnapshotNode {\n    readonly handle: string;\n    readonly role: string;\n    readonly name: string;\n    readonly value?: string;\n    readonly bounds: ComputerRect;\n    readonly states: readonly string[];\n    readonly supportsPress: boolean;\n    readonly supportsSetValue: boolean;\n    readonly secure: boolean;\n    readonly children?: readonly ComputerSnapshotNode[];\n}',
+    declaration: 'export interface ComputerSnapshotNode {\n    readonly handle: string;\n    readonly role: string;\n    readonly name: string;\n    readonly value?: string;\n    readonly bounds: ComputerRect;\n    readonly states: readonly string[];\n    readonly supportsPress: boolean;\n    readonly supportsSetValue: boolean;\n    readonly actions: readonly ComputerA11yAction[];\n    readonly secure: boolean;\n    readonly children?: readonly ComputerSnapshotNode[];\n}',
   },
   {
     name: 'ComputerSnapshotRequest',
-    declaration: 'export interface ComputerSnapshotRequest {\n    readonly windowId: ComputerWindowId;\n    readonly maxNodes: number;\n    readonly query?: string;\n}',
+    declaration: 'export interface ComputerSnapshotRequest {\n    readonly windowId: ComputerWindowId;\n    readonly maxNodes: number;\n    readonly query?: string;\n    readonly maxDepth?: number;\n    readonly rootHandle?: string;\n}',
+  },
+  {
+    name: 'ComputerStatus',
+    declaration: 'export interface ComputerStatus {\n    readonly configuredProvider?: string;\n    readonly selectedProvider?: string;\n    readonly registeredProviders: readonly string[];\n    readonly available: boolean;\n    readonly connection: ComputerConnectionState;\n    readonly capabilities: readonly ComputerCapability[];\n    readonly operations: readonly ComputerOperation[];\n    readonly unsupportedOperations: readonly ComputerOperation[];\n    readonly permissions?: ComputerPermissions;\n    readonly issues: readonly ComputerStatusIssue[];\n}',
+  },
+  {
+    name: 'ComputerStatusIssue',
+    declaration: 'export interface ComputerStatusIssue {\n    readonly code: string;\n    readonly message: string;\n    readonly recovery: string;\n}',
   },
   {
     name: 'ComputerWindow',

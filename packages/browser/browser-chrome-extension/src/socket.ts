@@ -58,7 +58,11 @@ export class BrowserHostClient {
     this.socket = socket
     // A replaced socket may still emit data or close; only the current one owns
     // the frame buffer and pending requests.
-    socket.on('data', (chunk) => { if (this.socket === socket) this.onData(chunk) })
+    socket.on('data', (chunk) => {
+      /* v8 ignore next -- a replaced socket is not the live buffer owner. */
+      if (this.socket !== socket) return
+      this.onData(chunk)
+    })
     socket.on('close', () => { if (this.socket === socket) this.failAll(new Error('browser host socket closed')) })
   }
 

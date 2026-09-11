@@ -13,6 +13,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { isDeniedApp, isHarnessPid } from './deny.ts'
 import type {
+  ComputerActionRequest,
   ComputerApp,
   ComputerAppId as ComputerAppIdBrand,
   ComputerCapability,
@@ -29,22 +30,34 @@ import type {
   ComputerScrollRequest,
   ComputerSnapshot,
   ComputerSnapshotRequest,
+  ComputerStatus,
   ComputerWindow,
   ComputerWindowId as ComputerWindowIdBrand,
 } from './types.ts'
 import { ComputerError } from './types.ts'
+import {
+  connectionState,
+  operationsForCapabilities,
+  permissionIssues,
+  recoveryForComputerCode,
+  unsupportedOperationsForCapabilities,
+} from './status.ts'
 
 export { ComputerError } from './types.ts'
 export { isDeniedApp, isHarnessPid, normalizeDenyToken, TERMINAL_DENY_IDS } from './deny.ts'
 export type {
+  ComputerA11yAction,
+  ComputerActionRequest,
   ComputerApp,
   ComputerCapability,
   ComputerClickRequest,
+  ComputerConnectionState,
   ComputerDragRequest,
   ComputerGrant,
   ComputerGrantScope,
   ComputerKeyRequest,
   ComputerLaunchRequest,
+  ComputerOperation,
   ComputerPermissions,
   ComputerPermissionState,
   ComputerProvider,
@@ -55,8 +68,17 @@ export type {
   ComputerSnapshot,
   ComputerSnapshotNode,
   ComputerSnapshotRequest,
+  ComputerStatus,
+  ComputerStatusIssue,
   ComputerWindow,
 } from './types.ts'
+export {
+  connectionState,
+  operationsForCapabilities,
+  permissionIssues,
+  recoveryForComputerCode,
+  unsupportedOperationsForCapabilities,
+} from './status.ts'
 
 /** Opaque application identity minted by a provider and fenced by the seam. */
 export type ComputerAppId = ComputerAppIdBrand
@@ -182,6 +204,73 @@ export class ComputerRuntime extends Service {
    */
   async permissions(signal?: AbortSignal): Promise<ComputerPermissions> {
     return this.resolveProvider().permissions(signal)
+  }
+
+  /**
+   * Read-only discovery of the selected provider. Distinguishes a cheap
+   * `available()` check from a bounded live permissions probe. Never throws
+   * for a missing, ambiguous, or down provider.
+   * @param signal - optional cancellation forwarded to the live probe.
+   * @returns configured vs live status, advertised operations, and recovery.
+   */
+  async status(signal?: AbortSignal): Promise<ComputerStatus> {
+    const registeredProviders = [...this.providers.keys()]
+    const configuredProvider = this.providerId
+    const empty = (issues: ComputerStatus['issues']): ComputerStatus => ({
+      ...configuredProvider === undefined ? {} : { configuredProvider },
+      registeredProviders,
+      available: false,
+      connection: 'unconfigured',
+      capabilities: [],
+      operations: [],
+      unsupportedOperations: unsupportedOperationsForCapabilities([]),
+      issues,
+    })
+    let provider: ComputerProvider
+    try {
+      provider = this.resolveProvider()
+    } catch (error) {
+      /* v8 ignore next -- resolveProvider throws ComputerError. */
+      if (!(error instanceof ComputerError)) throw error
+      return empty([{
+        code: error.code,
+        message: error.message,
+        recovery: recoveryForComputerCode(error.code, configuredProvider),
+      }])
+    }
+    const capabilities = provider.capabilities()
+    const base: ComputerStatus = {
+      ...configuredProvider === undefined ? {} : { configuredProvider },
+      selectedProvider: provider.id,
+      registeredProviders,
+      available: true,
+      connection: connectionState(true, false, false),
+      capabilities,
+      operations: operationsForCapabilities(capabilities),
+      unsupportedOperations: unsupportedOperationsForCapabilities(capabilities),
+      issues: [],
+    }
+    try {
+      const permissions = await provider.permissions(signal)
+      return {
+        ...base,
+        connection: connectionState(true, true, true),
+        permissions,
+        issues: permissionIssues(permissions, process.platform),
+      }
+    } catch (error) {
+      const code = error instanceof ComputerError ? error.code : 'COMPUTER_HOST_CRASHED'
+      const message = error instanceof Error ? error.message : String(error)
+      return {
+        ...base,
+        connection: connectionState(true, true, false),
+        issues: [{
+          code,
+          message,
+          recovery: recoveryForComputerCode(code),
+        }],
+      }
+    }
   }
 
   /**
@@ -333,6 +422,19 @@ export class ComputerRuntime extends Service {
     const window = await this.requireWindow(windowId, signal)
     this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
     await this.resolveProvider().setValue(handle, text, signal)
+  }
+
+  /**
+   * Invoke a named accessibility action on a node in a granted window.
+   * @param owner - exact Agent that owns the grant.
+   * @param windowId - window that owns the node.
+   * @param request - handle, action, and optional setValue text.
+   * @param signal - optional cancellation forwarded to the provider.
+   */
+  async action(owner: Agent, windowId: ComputerWindowId, request: ComputerActionRequest, signal?: AbortSignal): Promise<void> {
+    const window = await this.requireWindow(windowId, signal)
+    this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
+    await this.resolveProvider().action(request, signal)
   }
 
   /**

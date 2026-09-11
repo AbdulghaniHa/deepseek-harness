@@ -6,9 +6,12 @@ import ComputerRuntime, {
   ComputerAppId,
   ComputerError,
   ComputerWindowId,
+  connectionState,
   isDeniedApp,
   isHarnessPid,
   normalizeDenyToken,
+  permissionIssues,
+  recoveryForComputerCode,
   TERMINAL_DENY_IDS,
   type ComputerApp,
   type ComputerProvider,
@@ -76,6 +79,7 @@ function makeProvider(id: string, available: boolean, extras: Partial<ComputerPr
         states: [],
         supportsPress: true,
         supportsSetValue: false,
+        actions: ['activate'],
         secure: false,
       }],
     }),
@@ -88,6 +92,7 @@ function makeProvider(id: string, available: boolean, extras: Partial<ComputerPr
     }),
     press: () => Promise.resolve(),
     setValue: () => Promise.resolve(),
+    action: () => Promise.resolve(),
     click: (request) => {
       clicks.push({ x: request.x, y: request.y })
       return Promise.resolve()
@@ -151,6 +156,13 @@ describe('ComputerRuntime registration', () => {
     computer.registerProvider(makeProvider('local', available))
     expect(() => computer.registerProvider(makeProvider('local', available)))
       .toThrow(expect.objectContaining({ code: 'COMPUTER_DUPLICATE_PROVIDER' }))
+  })
+
+  it('clears providers when the computer runtime fiber is disposed', async () => {
+    const { ctx, computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    await expect(computer.listApps()).resolves.toHaveLength(1)
+    await ctx.fiber.dispose()
   })
 
   it('disposes provider registrations when the contributing fiber is disposed (HMR safety)', async () => {
@@ -427,6 +439,106 @@ describe('ComputerRuntime actions', () => {
     const runtime = new ComputerRuntime(ctx, {})
     runtime.registerProvider(makeProvider('local', available))
     expect(runtime.capabilities()).toContain('a11y')
+  })
+})
+
+describe('status', () => {
+  it('never throws when no provider is registered', async () => {
+    const { computer } = await mount()
+    const status = await computer.status()
+    expect(status.available).toBe(false)
+    expect(status.connection).toBe('unconfigured')
+    expect(status.issues[0]?.code).toBe('COMPUTER_PROVIDER_UNAVAILABLE')
+    expect(status.issues[0]?.recovery).toContain('computer_status')
+  })
+
+  it('reports a configured missing provider without throwing', async () => {
+    const { computer } = await mount({ provider: 'missing' })
+    const status = await computer.status()
+    expect(status.configuredProvider).toBe('missing')
+    expect(status.available).toBe(false)
+    expect(status.issues[0]?.code).toBe('COMPUTER_PROVIDER_CONFIGURED_MISSING')
+  })
+
+  it('reports live operations after a permissions probe', async () => {
+    const { computer } = await mount({ provider: 'local' })
+    computer.registerProvider(makeProvider('local', available))
+    const status = await computer.status()
+    expect(status.connection).toBe('live')
+    expect(status.selectedProvider).toBe('local')
+    expect(status.operations).toContain('action')
+    expect(status.permissions?.accessibility).toBe('granted')
+  })
+
+  it('reports probe-failed when the live probe throws', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      permissions: () => Promise.reject(new ComputerError('helper down', 'COMPUTER_HOST_CRASHED')),
+    }))
+    const status = await computer.status()
+    expect(status.available).toBe(true)
+    expect(status.connection).toBe('probe-failed')
+    expect(status.issues[0]?.code).toBe('COMPUTER_HOST_CRASHED')
+  })
+
+  it('maps a non-ComputerError probe failure to COMPUTER_HOST_CRASHED', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      permissions: () => Promise.reject(new Error('io')),
+    }))
+    expect((await computer.status()).issues[0]).toMatchObject({ code: 'COMPUTER_HOST_CRASHED', message: 'io' })
+    const second = await mount()
+    second.computer.registerProvider(makeProvider('local', available, {
+      permissions: () => Promise.reject('bare'),
+    }))
+    expect((await second.computer.status()).issues[0]?.message).toBe('bare')
+  })
+
+  it('lists permission recovery when Accessibility is denied', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      permissions: () => Promise.resolve({
+        accessibility: 'denied',
+        screenRecording: 'unknown',
+        inputInjection: 'not-required',
+      }),
+    }))
+    const status = await computer.status()
+    expect(status.issues.some(issue => issue.code === 'COMPUTER_PERMISSION_ACCESSIBILITY')).toBe(true)
+    expect(status.issues.some(issue => issue.code === 'COMPUTER_PERMISSION_SCREEN')).toBe(true)
+  })
+
+  it('invokes action after a grant', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.action(owner, ComputerWindowId('w1'), { handle: 'n1', action: 'activate' })
+  })
+})
+
+describe('status helpers', () => {
+  it('covers connection labels, recovery copy, and platform permission advice', () => {
+    expect(connectionState(false, false, false)).toBe('unconfigured')
+    expect(connectionState(true, false, false)).toBe('configured')
+    expect(connectionState(true, true, true)).toBe('live')
+    expect(connectionState(true, true, false)).toBe('probe-failed')
+    expect(recoveryForComputerCode('COMPUTER_PROVIDER_CONFIGURED_MISSING')).toContain('not registered')
+    expect(recoveryForComputerCode('COMPUTER_PROVIDER_CONFIGURED_MISSING', 'local')).toContain('local')
+    expect(recoveryForComputerCode('COMPUTER_PROVIDER_CONFIGURED_UNAVAILABLE')).toContain('unavailable')
+    expect(recoveryForComputerCode('COMPUTER_PROVIDER_CONFIGURED_UNAVAILABLE', 'local')).toContain('local')
+    expect(recoveryForComputerCode('COMPUTER_PROVIDER_AMBIGUOUS')).toContain('Multiple')
+    expect(recoveryForComputerCode('COMPUTER_UNSUPPORTED')).toContain('computer_status')
+    expect(recoveryForComputerCode('COMPUTER_GEOMETRY_CHANGED')).toContain('computer_observe')
+    expect(recoveryForComputerCode('COMPUTER_UNKNOWN')).toContain('Inspect')
+    const denied = {
+      accessibility: 'denied' as const,
+      screenRecording: 'denied' as const,
+      inputInjection: 'denied' as const,
+    }
+    expect(permissionIssues(denied, 'linux').some(issue => issue.recovery.includes('Wayland'))).toBe(true)
+    expect(permissionIssues(denied, 'win32')[0]?.recovery).toContain('Windows')
+    expect(permissionIssues(denied, 'darwin').some(issue => issue.recovery.includes('Screen Recording'))).toBe(true)
   })
 })
 

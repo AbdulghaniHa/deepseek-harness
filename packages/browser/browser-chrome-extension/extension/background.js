@@ -74,6 +74,14 @@ async function dispatch(method, params) {
       if (!attached.has(tabId)) {
         await chrome.debugger.attach({ tabId }, '1.3')
         attached.add(tabId)
+        try {
+          await chrome.debugger.sendCommand({ tabId }, 'Target.setAutoAttach', {
+            autoAttach: true, waitForDebuggerOnStart: false, flatten: true,
+          })
+        } catch {
+          // Older Chrome builds omit flattened child sessions; frame tools then
+          // attach to iframe targets explicitly.
+        }
       }
       return { ok: true }
     }
@@ -85,8 +93,17 @@ async function dispatch(method, params) {
       }
       return { ok: true }
     }
-    case 'debugger.sendCommand':
-      return chrome.debugger.sendCommand({ tabId: Number(params.tabId) }, params.method, params.params ?? {})
+    case 'debugger.sendCommand': {
+      const debuggee = params.targetId !== undefined && params.targetId !== ''
+        ? { targetId: String(params.targetId) }
+        : { tabId: Number(params.tabId) }
+      if (typeof params.sessionId === 'string' && params.sessionId.length > 0) {
+        return chrome.debugger.sendCommand(debuggee, params.method, params.params ?? {}, params.sessionId)
+      }
+      return chrome.debugger.sendCommand(debuggee, params.method, params.params ?? {})
+    }
+    case 'debugger.getTargets':
+      return chrome.debugger.getTargets()
     case 'history.search':
       return chrome.history.search({ text: params.query, maxResults: 50 })
     case 'bookmarks.list':
@@ -98,7 +115,11 @@ async function dispatch(method, params) {
     case 'readingList.add':
       return chrome.readingList.addEntry({ title: params.title, url: params.url, hasBeenRead: false })
     case 'downloads.list':
-      return chrome.downloads.search({ limit: 50, orderBy: ['-startTime'] })
+      return (await chrome.downloads.search({ limit: 50, orderBy: ['-startTime'] })).map(projectDownload)
+    case 'downloads.get': {
+      const rows = await chrome.downloads.search({ id: Number(params.id) })
+      return rows[0] === undefined ? null : projectDownload(rows[0])
+    }
     case 'notifications.create':
       return chrome.notifications.create({
         type: 'basic',
@@ -130,8 +151,33 @@ function flattenBookmarks(nodes, out = []) {
   return out
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  post({ jsonrpc: '2.0', method: 'debugger.event', params: { tabId: String(source.tabId ?? ''), method, params } })
+function projectDownload(item) {
+  const state = item.state === 'interrupted' || item.state === 'complete' ? item.state : 'in_progress'
+  return {
+    id: String(item.id ?? ''),
+    url: item.url ?? '',
+    filename: item.filename ?? '',
+    state,
+    bytesReceived: item.bytesReceived,
+    totalBytes: item.totalBytes,
+    exists: item.exists,
+    error: item.error,
+    filePath: state === 'complete' ? item.filename : undefined,
+  }
+}
+
+chrome.debugger.onEvent.addListener((source, method, params, sessionId) => {
+  post({
+    jsonrpc: '2.0',
+    method: 'debugger.event',
+    params: {
+      tabId: String(source.tabId ?? ''),
+      method,
+      params,
+      ...typeof sessionId === 'string' && sessionId.length > 0 ? { sessionId } : {},
+      ...source.targetId !== undefined ? { targetId: source.targetId } : {},
+    },
+  })
 })
 
 chrome.debugger.onDetach.addListener((source) => {

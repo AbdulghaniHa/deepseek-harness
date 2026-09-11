@@ -77,6 +77,9 @@ describe('computer toolview registration', () => {
     } as unknown as import('@deepseek-ai/cordis').Context
     computerToolview.apply(ctx)
     expect(registered.map(row => row.key)).toContain('computer_apps')
+    expect(registered.map(row => row.key)).toContain('computer_status')
+    expect(registered.map(row => row.key)).toContain('computer_observe')
+    expect(registered.map(row => row.key)).toContain('computer_action')
     expect(registered.map(row => row.key)).toContain('computer_clipboard')
     expect(registered.every(row => row.component === ComputerRow)).toBe(true)
     expect(registered.every(row => row.locale === 'conversation')).toBe(true)

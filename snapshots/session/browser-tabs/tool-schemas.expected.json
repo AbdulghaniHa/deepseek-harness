@@ -142,8 +142,45 @@
       }
     },
     {
+      "name": "browser_drag",
+      "description": "Drag from a snapshot ref or viewport point to another in the same frame using trusted pointer input.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "fromRef": {
+            "type": "string",
+            "description": "Snapshot ref for the press point."
+          },
+          "fromX": {
+            "type": "number",
+            "description": "Viewport x for the press point when not using fromRef."
+          },
+          "fromY": {
+            "type": "number"
+          },
+          "toRef": {
+            "type": "string",
+            "description": "Snapshot ref for the release point."
+          },
+          "toX": {
+            "type": "number",
+            "description": "Viewport x for the release point when not using toRef."
+          },
+          "toY": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "tabId"
+        ]
+      }
+    },
+    {
       "name": "browser_evaluate",
-      "description": "Run a JavaScript expression in the attached tab and return a JSON value. Requires approval.",
+      "description": "Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -152,11 +189,30 @@
           },
           "expression": {
             "type": "string"
+          },
+          "frameId": {
+            "type": "string",
+            "description": "Frame id from browser_frames; defaults to the main frame."
           }
         },
         "required": [
           "tabId",
           "expression"
+        ]
+      }
+    },
+    {
+      "name": "browser_frames",
+      "description": "List document frames in an attached tab. Use a returned frameId with snapshot, text, evaluate, and wait tools; default is the main frame.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tabId"
         ]
       }
     },
@@ -414,17 +470,29 @@
     },
     {
       "name": "browser_snapshot",
-      "description": "Capture a ref-annotated accessibility outline of the attached tab.",
+      "description": "Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.",
       "parameters": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "string"
+          },
+          "frameId": {
+            "type": "string",
+            "description": "Frame id from browser_frames; defaults to the main frame."
           }
         },
         "required": [
           "tabId"
         ]
+      }
+    },
+    {
+      "name": "browser_status",
+      "description": "Report the selected browser provider, whether a live probe reached Chrome, supported operations, and recovery steps. Does not require a tab grant.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
       }
     },
     {
@@ -437,12 +505,16 @@
     },
     {
       "name": "browser_text",
-      "description": "Read visible text from an attached tab.",
+      "description": "Read visible text from an attached tab or a selected frame.",
       "parameters": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "string"
+          },
+          "frameId": {
+            "type": "string",
+            "description": "Frame id from browser_frames; defaults to the main frame."
           }
         },
         "required": [
@@ -509,7 +581,7 @@
     },
     {
       "name": "browser_wait_for",
-      "description": "Wait until text appears or a JS expression is truthy on an attached tab.",
+      "description": "Wait until text appears or a JS expression is truthy on an attached tab or selected frame.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -524,10 +596,34 @@
           },
           "timeoutMs": {
             "type": "integer"
+          },
+          "frameId": {
+            "type": "string",
+            "description": "Frame id from browser_frames; defaults to the main frame."
           }
         },
         "required": [
           "tabId"
+        ]
+      }
+    },
+    {
+      "name": "browser_wait_for_download",
+      "description": "Wait until a Chrome download identified by browser_downloads completes. Returns the local path without reading or opening the file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "downloadId": {
+            "type": "string",
+            "description": "Download id from browser_downloads."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "How long to poll. Defaults to the tool timeout."
+          }
+        },
+        "required": [
+          "downloadId"
         ]
       }
     },
@@ -840,91 +936,6 @@
         },
         "required": [
           "name"
-        ]
-      }
-    },
-    {
-      "name": "str_replace_editor",
-      "description": "Custom editing tool for viewing, creating and editing files\n* State is persistent across command calls and discussions with the user\n* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep\n* The `create` command cannot be used if the specified `path` already exists as a file\n* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`\n* A null placeholder for a parameter unused by the selected command is treated as omitted. Required parameters still need values; omit `str_replace.new_str` rather than setting it to null when deleting a match\n\nNotes for using the `str_replace` command:\n* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!\n* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique\n* The `new_str` parameter should contain the edited lines that should replace the `old_str`",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "description": "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`.",
-            "enum": [
-              "view",
-              "create",
-              "str_replace",
-              "insert"
-            ]
-          },
-          "path": {
-            "type": "string",
-            "description": "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`."
-          },
-          "file_text": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Required string parameter of `create` command, with the content of the file to be created. A null placeholder is treated as omitted by commands that do not use this parameter."
-          },
-          "insert_line": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Required integer parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. A null placeholder is treated as omitted by commands that do not use this parameter."
-          },
-          "new_str": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional string parameter of `str_replace` command containing the new string (if omitted, no string will be added). Required string parameter of `insert` command containing the string to insert. A null placeholder is accepted only by commands that do not use this parameter."
-          },
-          "old_str": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Required string parameter of `str_replace` command containing the string in `path` to replace. A null placeholder is treated as omitted by commands that do not use this parameter."
-          },
-          "view_range": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file."
-          }
-        },
-        "required": [
-          "command",
-          "path"
         ]
       }
     },

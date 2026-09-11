@@ -227,6 +227,10 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       unsupported('setValue', platform)
     },
 
+    async action(): Promise<void> {
+      unsupported('action', platform)
+    },
+
     async click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void> {
       if (platform !== 'darwin') unsupported('click', platform)
       await io.run(['osascript', '-e', `tell application "System Events" to click at {${Math.round(request.x)}, ${Math.round(request.y)}}`], signal)

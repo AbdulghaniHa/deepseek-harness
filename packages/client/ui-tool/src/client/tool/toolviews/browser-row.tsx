@@ -9,9 +9,11 @@ import { CONVERSATION_NS as NS } from '../../locale.ts'
 type BrowserRowProps = ToolCallViewProps & PropsLocale<'conversation'>
 
 const BROWSER_TOOLS = [
+  'browser_status',
   'browser_tabs',
   'browser_open',
   'browser_attach',
+  'browser_frames',
   'browser_navigate',
   'browser_snapshot',
   'browser_text',
@@ -20,10 +22,13 @@ const BROWSER_TOOLS = [
   'browser_type',
   'browser_press_key',
   'browser_scroll',
+  'browser_drag',
   'browser_select_option',
   'browser_wait_for',
   'browser_evaluate',
   'browser_console',
+  'browser_network',
+  'browser_network_body',
   'browser_close',
   'browser_hover',
   'browser_handle_dialog',
@@ -33,6 +38,7 @@ const BROWSER_TOOLS = [
   'browser_bookmarks',
   'browser_reading_list',
   'browser_downloads',
+  'browser_wait_for_download',
 ] as const
 
 function browserSummary(block: BrowserRowProps['block'], untitled: string): string | undefined {

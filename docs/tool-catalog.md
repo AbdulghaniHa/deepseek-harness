@@ -41,8 +41,8 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
-| `@deepseek-ai/dsh-tool-computer-use` | `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
+| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2425,9 +2425,51 @@ List recent Chrome downloads.
 
 Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
+### `browser_drag`
+
+Drag from a snapshot ref or viewport point to another in the same frame using trusted pointer input.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "fromRef": {
+      "type": "string",
+      "description": "Snapshot ref for the press point."
+    },
+    "fromX": {
+      "type": "number",
+      "description": "Viewport x for the press point when not using fromRef."
+    },
+    "fromY": {
+      "type": "number"
+    },
+    "toRef": {
+      "type": "string",
+      "description": "Snapshot ref for the release point."
+    },
+    "toX": {
+      "type": "number",
+      "description": "Viewport x for the release point when not using toRef."
+    },
+    "toY": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
 ### `browser_evaluate`
 
-Run a JavaScript expression in the attached tab and return a JSON value. Requires approval.
+Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.
 
 ```json
 {
@@ -2438,11 +2480,35 @@ Run a JavaScript expression in the attached tab and return a JSON value. Require
     },
     "expression": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
     "tabId",
     "expression"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_frames`
+
+List document frames in an attached tab. Use a returned frameId with snapshot, text, evaluate, and wait tools; default is the main frame.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
   ]
 }
 ```
@@ -2763,7 +2829,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_snapshot`
 
-Capture a ref-annotated accessibility outline of the attached tab.
+Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.
 
 ```json
 {
@@ -2771,11 +2837,28 @@ Capture a ref-annotated accessibility outline of the attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
     "tabId"
   ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_status`
+
+Report the selected browser provider, whether a live probe reached Chrome, supported operations, and recovery steps. Does not require a tab grant.
+
+```json
+{
+  "type": "object",
+  "properties": {}
 }
 ```
 
@@ -2796,7 +2879,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_text`
 
-Read visible text from an attached tab.
+Read visible text from an attached tab or a selected frame.
 
 ```json
 {
@@ -2804,6 +2887,10 @@ Read visible text from an attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
@@ -2883,7 +2970,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_wait_for`
 
-Wait until text appears or a JS expression is truthy on an attached tab.
+Wait until text appears or a JS expression is truthy on an attached tab or selected frame.
 
 ```json
 {
@@ -2900,10 +2987,39 @@ Wait until text appears or a JS expression is truthy on an attached tab.
     },
     "timeoutMs": {
       "type": "integer"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
     "tabId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_wait_for_download`
+
+Wait until a Chrome download identified by browser_downloads completes. Returns the local path without reading or opening the file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "downloadId": {
+      "type": "string",
+      "description": "Download id from browser_downloads."
+    },
+    "timeoutMs": {
+      "type": "number",
+      "description": "How long to poll. Defaults to the tool timeout."
+    }
+  },
+  "required": [
+    "downloadId"
   ]
 }
 ```
@@ -2915,6 +3031,41 @@ browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible
 <a id="deepseek-aidsh-tool-computer-use"></a>
 
 ## `@deepseek-ai/dsh-tool-computer-use`
+
+### `computer_action`
+
+Invoke an accessibility action already advertised on a captured node: activate, toggle, select, expandCollapse, or setValue.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Epoch-scoped snapshot ref."
+    },
+    "action": {
+      "type": "string",
+      "description": "activate, toggle, select, expandCollapse, or setValue."
+    },
+    "value": {
+      "type": "string",
+      "description": "Replacement value when action is setValue."
+    }
+  },
+  "required": [
+    "windowId",
+    "ref",
+    "action"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 ### `computer_apps`
 
@@ -2931,7 +3082,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_click`
 
-Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it.
+Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it. Screenshot-space coordinates bind to observationId.
 
 ```json
 {
@@ -2957,6 +3108,10 @@ Click a snapshot ref or coordinates in a window. Refs prefer an accessibility pr
       "type": "string",
       "description": "screenshot (default) or screen."
     },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
     "button": {
       "type": "string",
       "description": "left, right, or middle."
@@ -2964,6 +3119,13 @@ Click a snapshot ref or coordinates in a window. Refs prefer an accessibility pr
     "count": {
       "type": "number",
       "description": "Click count. Defaults to 1."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3001,7 +3163,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_drag`
 
-Drag from one point to another in a window.
+Drag from one snapshot ref or point to another in a window.
 
 ```json
 {
@@ -3020,12 +3182,11 @@ Drag from one point to another in a window.
         },
         "y": {
           "type": "number"
+        },
+        "ref": {
+          "type": "string"
         }
-      },
-      "required": [
-        "x",
-        "y"
-      ]
+      }
     },
     "to": {
       "type": "object",
@@ -3036,16 +3197,26 @@ Drag from one point to another in a window.
         },
         "y": {
           "type": "number"
+        },
+        "ref": {
+          "type": "string"
         }
-      },
-      "required": [
-        "x",
-        "y"
-      ]
+      }
     },
     "space": {
       "type": "string",
       "description": "screenshot (default) or screen."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3123,12 +3294,53 @@ Move the pointer to coordinates in a window without clicking.
     "space": {
       "type": "string",
       "description": "screenshot (default) or screen."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
     }
   },
   "required": [
     "windowId",
     "x",
     "y"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_observe`
+
+Capture a bounded accessibility snapshot plus an optional screenshot with explicit pixel dimensions, logical bounds, and scale. Text-only model routes receive the snapshot without an image. Bind later screenshot-space coordinates to the returned observationId.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "query": {
+      "type": "string",
+      "description": "Optional role or name substring filter."
+    },
+    "maxDepth": {
+      "type": "number",
+      "description": "Include nodes through this depth (root is 0)."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional current snapshot ref whose node becomes the subtree root."
+    },
+    "screenshot": {
+      "type": "boolean",
+      "description": "Include a screenshot when the route accepts images. Defaults to true on image-capable routes."
+    }
+  },
+  "required": [
+    "windowId"
   ]
 }
 ```
@@ -3243,6 +3455,10 @@ Scroll at a snapshot ref or coordinates.
       "type": "string",
       "description": "screenshot (default) or screen."
     },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
     "direction": {
       "type": "string",
       "description": "up, down, left, or right."
@@ -3250,6 +3466,13 @@ Scroll at a snapshot ref or coordinates.
     "amount": {
       "type": "number",
       "description": "Scroll amount in provider units."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3264,7 +3487,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_snapshot`
 
-Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes.
+Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes. maxDepth and a current snapshot ref select a subtree; node states and supported actions are included.
 
 ```json
 {
@@ -3280,12 +3503,29 @@ Read the accessibility tree of a window as an epoch-scoped outline. Primary obse
     },
     "maxDepth": {
       "type": "number",
-      "description": "Unused depth hint reserved for providers; the node cap is snapshotMaxNodes."
+      "description": "Include nodes through this depth (root is 0). Output caps do not bound native full-tree traversal."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional current snapshot ref whose node becomes the subtree root."
     }
   },
   "required": [
     "windowId"
   ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_status`
+
+Report the selected computer-use provider, whether a live probe succeeded, supported operations, permission failures, and recovery steps. Does not require a grant.
+
+```json
+{
+  "type": "object",
+  "properties": {}
 }
 ```
 
@@ -3327,7 +3567,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_wait_for`
 
-Poll a window accessibility tree until text or the title matches, or the timeout elapses.
+Poll a window accessibility tree until text appears or disappears, the title matches, or a captured node reaches a state.
 
 ```json
 {
@@ -3339,11 +3579,23 @@ Poll a window accessibility tree until text or the title matches, or the timeout
     },
     "text": {
       "type": "string",
-      "description": "Substring to find in the snapshot outline."
+      "description": "Substring to find in the snapshot outline, or to wait until gone when gone is true."
+    },
+    "gone": {
+      "type": "boolean",
+      "description": "When true, succeed once text is absent from the outline."
     },
     "title": {
       "type": "string",
       "description": "Substring to find in the window title."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref whose states are polled."
+    },
+    "state": {
+      "type": "string",
+      "description": "enabled, disabled, selected, expanded, or collapsed."
     },
     "timeoutMs": {
       "type": "number",

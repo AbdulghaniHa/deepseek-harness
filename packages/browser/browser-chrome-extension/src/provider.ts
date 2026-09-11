@@ -3,7 +3,7 @@
  * @module @deepseek-ai/dsh-browser-chrome-extension/provider
  */
 
-import { BrowserError, BrowserTabId } from '@deepseek-ai/dsh-browser'
+import { BrowserError, BrowserDownloadId, BrowserTabId } from '@deepseek-ai/dsh-browser'
 import type {
   BrowserBookmarkItem,
   BrowserCapability,
@@ -129,7 +129,13 @@ export class ChromeExtensionProvider implements BrowserProvider {
   }
 
   async listDownloads(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]> {
-    return await this.call('downloads.list', undefined, signal) as readonly BrowserDownloadItem[]
+    const rows = await this.call('downloads.list', undefined, signal) as readonly BrowserDownloadItem[]
+    return rows.map(normalizeDownload)
+  }
+
+  async getDownload(id: ReturnType<typeof BrowserDownloadId>, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined> {
+    const row = await this.call('downloads.get', { id }, signal)
+    return row === null || row === undefined ? undefined : normalizeDownload(row as BrowserDownloadItem)
   }
 
   /**
@@ -140,11 +146,15 @@ export class ChromeExtensionProvider implements BrowserProvider {
     try {
       await this.client.connect(this.options.socketPath, this.options.connectTimeoutMs)
     } catch (error) {
+      /* v8 ignore next -- createConnection rejects with Error. */
       const message = error instanceof Error ? error.message : String(error)
       throw new BrowserError(
         `Chrome native host is not connected (${message})`,
         'BROWSER_NOT_CONNECTED',
-        { cause: error instanceof Error ? error : undefined },
+        {
+          /* v8 ignore next -- createConnection rejects with Error. */
+          cause: error instanceof Error ? error : undefined,
+        },
       )
     }
   }
@@ -163,9 +173,11 @@ export class ChromeExtensionProvider implements BrowserProvider {
     } finally {
       if (this.connecting === attempt) this.connecting = undefined
     }
+    /* v8 ignore start -- connectOnce resolves only after the socket is up. */
     if (!this.client.connected()) {
       throw new BrowserError('Chrome native host is not connected', 'BROWSER_NOT_CONNECTED')
     }
+    /* v8 ignore stop */
   }
 
   private async call(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {
@@ -203,4 +215,13 @@ export class ChromeExtensionProvider implements BrowserProvider {
 
 function normalizeTab(tab: BrowserTab): BrowserTab {
   return { ...tab, id: BrowserTabId(String(tab.id)) }
+}
+
+function normalizeDownload(item: BrowserDownloadItem): BrowserDownloadItem {
+  const state = item.state === 'interrupted' || item.state === 'complete' ? item.state : 'in_progress'
+  return {
+    ...item,
+    id: BrowserDownloadId(String(item.id)),
+    state,
+  }
 }

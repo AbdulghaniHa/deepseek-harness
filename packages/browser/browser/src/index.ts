@@ -20,14 +20,24 @@ import type {
   BrowserCapability,
   BrowserCdpEvent,
   BrowserCdpRequest,
+  BrowserDownloadId as BrowserDownloadIdBrand,
   BrowserDownloadItem,
+  BrowserFrameId as BrowserFrameIdBrand,
   BrowserHistoryItem,
   BrowserOpenTabRequest,
   BrowserProvider,
   BrowserReadingListItem,
+  BrowserStatus,
   BrowserTab,
 } from './types.ts'
 import { BrowserError } from './types.ts'
+import {
+  browserConnectionState,
+  browserProbeIssue,
+  operationsForBrowserCapabilities,
+  recoveryForBrowserCode,
+  unsupportedOperationsForBrowserCapabilities,
+} from './status.ts'
 
 export type { BrowserPreview } from './client.ts'
 export {
@@ -39,19 +49,38 @@ export type {
   BrowserCapability,
   BrowserCdpEvent,
   BrowserCdpRequest,
+  BrowserConnectionState,
   BrowserDownloadItem,
+  BrowserDownloadState,
+  BrowserFrame,
   BrowserHistoryItem,
   BrowserOpenTabRequest,
+  BrowserOperation,
   BrowserProvider,
   BrowserReadingListItem,
+  BrowserStatus,
+  BrowserStatusIssue,
   BrowserTab,
 } from './types.ts'
+export {
+  browserConnectionState,
+  browserProbeIssue,
+  operationsForBrowserCapabilities,
+  recoveryForBrowserCode,
+  unsupportedOperationsForBrowserCapabilities,
+} from './status.ts'
 
 /** Opaque Chrome-tab identity minted by a provider and fenced by the seam. */
 export type BrowserTabId = BrowserTabIdBrand
 
 /** Opaque attachment identity minted by {@link BrowserRuntime} for one owner + tab. */
 export type BrowserAttachmentId = BrowserAttachmentIdBrand
+
+/** Opaque document-frame identity minted by a provider and fenced by the seam. */
+export type BrowserFrameId = BrowserFrameIdBrand
+
+/** Opaque Chrome-download identity minted by a provider and fenced by the seam. */
+export type BrowserDownloadId = BrowserDownloadIdBrand
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -100,6 +129,24 @@ export function BrowserTabId(value: string): BrowserTabId {
  */
 export function BrowserAttachmentId(value: string): BrowserAttachmentId {
   return brandString<BrowserAttachmentIdBrand>(value)
+}
+
+/**
+ * Brand one provider-issued frame id.
+ * @param value - raw frame id from CDP or the selected provider.
+ * @returns the same string with the browser-frame brand.
+ */
+export function BrowserFrameId(value: string): BrowserFrameId {
+  return brandString<BrowserFrameIdBrand>(value)
+}
+
+/**
+ * Brand one provider-issued download id.
+ * @param value - raw download id from the selected provider.
+ * @returns the same string with the browser-download brand.
+ */
+export function BrowserDownloadId(value: string): BrowserDownloadId {
+  return brandString<BrowserDownloadIdBrand>(value)
 }
 
 /**
@@ -367,6 +414,62 @@ export class BrowserRuntime extends TypertRemoteService {
   }
 
   /**
+   * Read-only discovery of the selected provider. Distinguishes a cheap
+   * `available()` check from a bounded live `listTabs` probe. Never throws
+   * for a missing, ambiguous, or disconnected provider.
+   * @param signal - optional cancellation forwarded to the live probe.
+   * @returns configured vs live status, advertised operations, and recovery.
+   */
+  async status(signal?: AbortSignal): Promise<BrowserStatus> {
+    const registeredProviders = [...this.providers.keys()]
+    const configuredProvider = this.providerId
+    const empty = (issues: BrowserStatus['issues']): BrowserStatus => ({
+      ...configuredProvider === undefined ? {} : { configuredProvider },
+      registeredProviders,
+      available: false,
+      connection: 'unconfigured',
+      capabilities: [],
+      operations: [],
+      unsupportedOperations: unsupportedOperationsForBrowserCapabilities([]),
+      issues,
+    })
+    let provider: BrowserProvider
+    try {
+      provider = this.resolveProvider()
+    } catch (error) {
+      /* v8 ignore next -- resolveProvider throws BrowserError. */
+      if (!(error instanceof BrowserError)) throw error
+      return empty([{
+        code: error.code,
+        message: error.message,
+        recovery: recoveryForBrowserCode(error.code, configuredProvider),
+      }])
+    }
+    const capabilities = provider.capabilities()
+    const base: BrowserStatus = {
+      ...configuredProvider === undefined ? {} : { configuredProvider },
+      selectedProvider: provider.id,
+      registeredProviders,
+      available: true,
+      connection: browserConnectionState(true, false, false),
+      capabilities,
+      operations: operationsForBrowserCapabilities(capabilities),
+      unsupportedOperations: unsupportedOperationsForBrowserCapabilities(capabilities),
+      issues: [],
+    }
+    try {
+      await provider.listTabs(signal)
+      return { ...base, connection: browserConnectionState(true, true, true) }
+    } catch (error) {
+      return {
+        ...base,
+        connection: browserConnectionState(true, true, false),
+        issues: [browserProbeIssue(error)],
+      }
+    }
+  }
+
+  /**
    * Search browsing history through the optional history facet.
    * @param query - history search string.
    * @param signal - optional cancellation forwarded to the provider.
@@ -445,6 +548,21 @@ export class BrowserRuntime extends TypertRemoteService {
       throw new BrowserError('the selected browser provider does not expose downloads', 'BROWSER_FACET_UNAVAILABLE')
     }
     return provider.listDownloads(signal)
+  }
+
+  /**
+   * Read one download through the optional downloads facet.
+   * @param id - branded download id from {@link listDownloads}.
+   * @param signal - optional cancellation forwarded to the provider.
+   * @returns the download, or undefined when Chrome no longer has it.
+   */
+  async getDownload(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined> {
+    const provider = this.resolveProvider()
+    if (provider.getDownload !== undefined) return provider.getDownload(id, signal)
+    if (provider.listDownloads === undefined) {
+      throw new BrowserError('the selected browser provider does not expose downloads', 'BROWSER_FACET_UNAVAILABLE')
+    }
+    return (await provider.listDownloads(signal)).find(item => item.id === id)
   }
 
   /**

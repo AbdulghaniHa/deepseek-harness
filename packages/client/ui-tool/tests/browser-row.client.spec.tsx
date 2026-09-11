@@ -82,6 +82,10 @@ describe('browser toolview registration', () => {
     } as unknown as import('@deepseek-ai/cordis').Context
     browserToolview.apply(ctx)
     expect(registered.map(row => row.key)).toContain('browser_tabs')
+    expect(registered.map(row => row.key)).toContain('browser_status')
+    expect(registered.map(row => row.key)).toContain('browser_frames')
+    expect(registered.map(row => row.key)).toContain('browser_drag')
+    expect(registered.map(row => row.key)).toContain('browser_wait_for_download')
     expect(registered.map(row => row.key)).toContain('browser_cdp')
     expect(registered.every(row => row.component === BrowserRow)).toBe(true)
     expect(registered.every(row => row.locale === 'conversation')).toBe(true)

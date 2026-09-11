@@ -6,10 +6,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { BrowserTabId } from '@deepseek-ai/dsh-browser'
+import { BrowserDownloadId, BrowserError, BrowserFrameId, BrowserTabId, type BrowserFrame } from '@deepseek-ai/dsh-browser'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { BrowserSnapshot } from './snapshot.ts'
+import type { BrowserSnapshot, SnapshotNode } from './snapshot.ts'
 import { buildSnapshot, resolveRef } from './snapshot.ts'
+import { flattenFrameTree, assertSameFrame, type FrameTreeNode } from './frames.ts'
 import { boundResponseBody, createNetworkCapture, type NetworkRequestEntry } from './network.ts'
 import { approveBrowserAction, type BrowserApprovalMode } from './approval.ts'
 import {
@@ -20,7 +21,7 @@ import {
   presentBrowserCall,
   presentBrowserResult,
 } from './present.ts'
-import { cdpClient, clickAt, nodeCenter, pageIdentity, typeText, type CdpClient } from './cdp.ts'
+import { cdpClient, clickAt, dragAt, nodeCenter, pageIdentity, typeText, type CdpClient } from './cdp.ts'
 import type { BrowserApprover } from './approval.ts'
 
 /** Resolved tool-browser config used while registering tools. */
@@ -38,9 +39,18 @@ export interface ToolBrowserOptions {
 /** Default entry ceiling when the caller omits `limit`. */
 const DEFAULT_NETWORK_LIMIT = 50
 
+interface AttachedTarget {
+  sessionId: string
+  targetId: string
+  url: string
+  type: string
+}
+
 interface TabState {
   epoch: number
   snapshot: BrowserSnapshot | undefined
+  frames: BrowserFrame[]
+  targets: AttachedTarget[]
 }
 
 /**
@@ -52,7 +62,32 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
   const states = new Map<string, TabState>()
   const approval = ctx.get('approval') as BrowserApprover | undefined
   const capture = createNetworkCapture({ maxRequests: options.networkMaxRequests })
-  ctx.effect(() => ctx.browser.onCdpEvent((event) => { capture.record(event) }), 'tool-browser network capture')
+  ctx.effect(() => ctx.browser.onCdpEvent((event) => {
+    capture.record(event)
+    const tabKey = String(event.tabId)
+    if (event.method === 'Target.attachedToTarget') {
+      const info = event.params.targetInfo
+      const sessionId = typeof event.params.sessionId === 'string' ? event.params.sessionId : event.sessionId
+      if (typeof sessionId === 'string' && sessionId.length > 0 && info !== null && typeof info === 'object') {
+        const target = info as { targetId?: unknown; url?: unknown; type?: unknown }
+        tabState(tabKey).targets.push({
+          sessionId,
+          targetId: typeof target.targetId === 'string' ? target.targetId : '',
+          url: typeof target.url === 'string' ? target.url : '',
+          type: typeof target.type === 'string' ? target.type : '',
+        })
+      }
+    }
+    if (event.method === 'Target.detachedFromTarget') {
+      const sessionId = typeof event.params.sessionId === 'string' ? event.params.sessionId : event.sessionId
+      const current = tabState(tabKey)
+      current.targets = current.targets.filter(item => item.sessionId !== sessionId)
+      bumpEpoch(tabKey)
+    }
+    if (event.method === 'Page.frameNavigated' || event.method === 'Page.frameDetached') {
+      bumpEpoch(tabKey)
+    }
+  }), 'tool-browser network capture')
 
   const requireOwner = (agent: Agent | undefined): Agent => {
     if (agent === undefined) throw new Error('browser tools require an agent')
@@ -96,7 +131,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
   const tabState = (tabId: string): TabState => {
     const existing = states.get(tabId)
     if (existing !== undefined) return existing
-    const created: TabState = { epoch: 1, snapshot: undefined }
+    const created: TabState = { epoch: 1, snapshot: undefined, frames: [], targets: [] }
     states.set(tabId, created)
     return created
   }
@@ -108,19 +143,136 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     return state
   }
 
-  const snapshotTab = async (owner: Agent, tabId: ReturnType<typeof BrowserTabId>, signal?: AbortSignal): Promise<BrowserSnapshot> => {
+  const cdpFor = (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    signal: AbortSignal | undefined,
+    frame?: BrowserFrame,
+  ): CdpClient => cdpClient(ctx.browser, owner, tabId, signal, frame === undefined ? undefined : {
+    ...frame.sessionId !== undefined ? { sessionId: frame.sessionId } : {},
+    ...frame.targetId !== undefined ? { targetId: frame.targetId } : {},
+  })
+
+  const refreshFrames = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    signal?: AbortSignal,
+  ): Promise<readonly BrowserFrame[]> => {
     const cdp = cdpClient(ctx.browser, owner, tabId, signal)
-    const identity = await pageIdentity(cdp)
-    const tree = await cdp.send('Accessibility.getFullAXTree') as { nodes?: unknown[] }
+    await cdp.send('Page.enable')
+    const tree = await cdp.send('Page.getFrameTree') as { frameTree?: FrameTreeNode }
+    const state = tabState(tabId)
+    const frames = tree.frameTree === undefined ? [] : flattenFrameTree(tree.frameTree)
+    state.frames = frames.map((frame) => {
+      const target = state.targets.find(item => item.type === 'iframe' && item.url === frame.url)
+      return {
+        ...frame,
+        ...target !== undefined ? { sessionId: target.sessionId, targetId: target.targetId } : {},
+      }
+    })
+    return state.frames
+  }
+
+  const requireFrame = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    frameId: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<BrowserFrame | undefined> => {
+    const frames = await refreshFrames(owner, tabId, signal)
+    if (frameId === undefined) return frames.find(frame => frame.parentFrameId === undefined)
+    const branded = BrowserFrameId(frameId)
+    const frame = frames.find(item => item.frameId === branded)
+    if (frame === undefined) {
+      throw new BrowserError(`frame "${frameId}" detached or navigated`, 'BROWSER_FRAME_DETACHED')
+    }
+    return frame
+  }
+
+  const thrownMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
+
+  const resolveNode = (tabId: string, ref: string): SnapshotNode => {
+    const state = tabState(tabId)
+    if (state.snapshot === undefined) throw new Error('take a browser_snapshot before using a ref')
+    try {
+      return resolveRef(ref, state.snapshot)
+    } catch (error) {
+      const message = thrownMessage(error)
+      if (message.includes('stale')) throw new BrowserError(message, 'BROWSER_STALE_REF')
+      throw error
+    }
+  }
+
+  const snapshotTab = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    signal?: AbortSignal,
+    frameId?: string,
+  ): Promise<BrowserSnapshot> => {
+    const frame = await requireFrame(owner, tabId, frameId, signal)
+    const treeCdp = frame?.sessionId !== undefined || frame === undefined
+      ? cdpFor(owner, tabId, signal, frame)
+      : cdpClient(ctx.browser, owner, tabId, signal)
+    const identityCdp = cdpFor(owner, tabId, signal, frame)
+    const identity = await pageIdentity(identityCdp)
+    const tree = await treeCdp.send(
+      'Accessibility.getFullAXTree',
+      frame !== undefined && frame.parentFrameId !== undefined && frame.sessionId === undefined
+        ? { frameId: frame.frameId }
+        : undefined,
+    ) as { nodes?: unknown[] }
     const state = tabState(tabId)
     const snapshot = buildSnapshot((tree.nodes ?? []) as never, {
       url: identity.url,
       title: identity.title,
       epoch: state.epoch,
       maxNodes: options.snapshotMaxNodes,
+      ...frame !== undefined ? { frameId: frame.frameId } : {},
     })
     state.snapshot = snapshot
     return snapshot
+  }
+
+  const afterAction = async (
+    owner: Agent,
+    tabId: string,
+    signal?: AbortSignal,
+    frameId?: string,
+  ): Promise<Record<string, unknown>> => {
+    bumpEpoch(tabId)
+    try {
+      const snapshot = await snapshotTab(owner, BrowserTabId(tabId), signal, frameId)
+      return snapshotValue(owner, tabId, snapshot, signal, frameId)
+    } catch (error) {
+      return {
+        tabId,
+        url: '',
+        title: '',
+        text: '',
+        truncated: false,
+        observationError: thrownMessage(error),
+        ...frameId !== undefined ? { frameId } : {},
+      }
+    }
+  }
+
+  const pointFromNode = async (cdp: CdpClient, node: SnapshotNode, ref: string): Promise<{ x: number; y: number }> => {
+    if (node.backendNodeId === undefined) throw new Error(`snapshot ref "${ref}" has no backend node`)
+    const center = await nodeCenter(cdp, node.backendNodeId)
+    if (center === undefined) throw new Error(`snapshot ref "${ref}" has no box model`)
+    return center
+  }
+
+  const cdpForNode = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    node: SnapshotNode,
+    signal?: AbortSignal,
+  ): Promise<CdpClient> => {
+    const frame = node.frameId === undefined
+      ? undefined
+      : await requireFrame(owner, tabId, node.frameId, signal)
+    return cdpFor(owner, tabId, signal, frame)
   }
 
   const previewProperties = {
@@ -134,11 +286,17 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       return { url: preview.url, title: preview.title, media: { screenshot: preview.screenshot } }
     } catch (error) {
       // Preview failure must not turn a completed browser action into a retryable tool failure.
-      return { url: '', title: '', media: { previewError: error instanceof Error ? error.message : String(error) } }
+      return { url: '', title: '', media: { previewError: thrownMessage(error) } }
     }
   }
 
-  const snapshotValue = async (owner: Agent, tabId: string, snapshot: BrowserSnapshot, signal?: AbortSignal) => {
+  const snapshotValue = async (
+    owner: Agent,
+    tabId: string,
+    snapshot: BrowserSnapshot,
+    signal?: AbortSignal,
+    frameId?: string,
+  ) => {
     // Snapshot results carry their own page identity; only the capture is added.
     const preview = await previewValue(owner, BrowserTabId(tabId), signal)
     return {
@@ -147,11 +305,73 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       title: snapshot.title,
       text: snapshot.text,
       truncated: snapshot.truncated,
+      ...frameId !== undefined ? { frameId } : {},
       ...preview.media,
     }
   }
 
   const commonMeta = (_args: unknown, value: Record<string, unknown>) => browserMetaFromValue(value)
+
+  ctx.tools.register(defineTool({
+    name: 'browser_status',
+    description: 'Report the selected browser provider, whether a live probe reached Chrome, supported operations, and recovery steps. Does not require a tab grant.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          selectedProvider: { type: 'string' },
+          configuredProvider: { type: 'string' },
+          available: { type: 'boolean', required: true },
+          connection: { type: 'string', required: true },
+          capabilities: { type: 'array', required: true, items: { type: 'string' } },
+          operations: { type: 'array', required: true, items: { type: 'string' } },
+          unsupportedOperations: { type: 'array', required: true, items: { type: 'string' } },
+          issues: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                code: { type: 'string', required: true },
+                message: { type: 'string', required: true },
+                recovery: { type: 'string', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => {
+        const lines = [
+          `provider: ${value.selectedProvider ?? value.configuredProvider ?? '(none)'} (${value.connection})`,
+          `operations: ${value.operations.join(', ') || '(none)'}`,
+          ...value.unsupportedOperations.length > 0 ? [`unsupported: ${value.unsupportedOperations.join(', ')}`] : [],
+          ...value.issues.map(issue => `issue ${issue.code}: ${issue.message} — ${issue.recovery}`),
+        ]
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    isConcurrencySafe: () => true,
+    execute: async (_args, exec) => {
+      const status = await ctx.browser.status(exec.signal)
+      return {
+        ...status.selectedProvider !== undefined ? { selectedProvider: status.selectedProvider } : {},
+        ...status.configuredProvider !== undefined ? { configuredProvider: status.configuredProvider } : {},
+        available: status.available,
+        connection: status.connection,
+        capabilities: [...status.capabilities],
+        operations: [...status.operations],
+        unsupportedOperations: [...status.unsupportedOperations],
+        issues: status.issues.map(issue => ({ ...issue })),
+      }
+    },
+    presentCall: () => presentBrowserCall('Browser status', 'fetch'),
+    presentResult: () => presentBrowserResult('Status'),
+  }))
 
   ctx.tools.register(defineTool({
     name: 'browser_tabs',
@@ -280,6 +500,60 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
   }))
 
   ctx.tools.register(defineTool({
+    name: 'browser_frames',
+    description: 'List document frames in an attached tab. Use a returned frameId with snapshot, text, evaluate, and wait tools; default is the main frame.',
+    parameters: { tabId: { type: 'string', required: true } },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          tabId: { type: 'string', required: true },
+          frames: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                frameId: { type: 'string', required: true },
+                parentFrameId: { type: 'string' },
+                url: { type: 'string', required: true },
+                name: { type: 'string' },
+                securityOrigin: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.frames.map(frame => `- [${frame.frameId}] ${frame.name !== undefined ? `${frame.name} ` : ''}${frame.url}${frame.parentFrameId === undefined ? ' (main)' : ''}`).join('\n') || '(no frames)',
+      }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    isConcurrencySafe: () => true,
+    execute: async (args, exec) => {
+      const owner = requireOwner(exec.agent)
+      const tabId = BrowserTabId(args.tabId)
+      const frames = await refreshFrames(owner, tabId, exec.signal)
+      return {
+        tabId: args.tabId,
+        frames: frames.map(frame => ({
+          frameId: frame.frameId,
+          ...frame.parentFrameId !== undefined ? { parentFrameId: frame.parentFrameId } : {},
+          url: frame.url,
+          ...frame.name !== undefined ? { name: frame.name } : {},
+          ...frame.securityOrigin !== undefined ? { securityOrigin: frame.securityOrigin } : {},
+        })),
+      }
+    },
+    presentCall: args => presentBrowserCall(`Frames ${args.tabId}`, 'fetch'),
+    presentResult: () => presentBrowserResult('Frames'),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'browser_navigate',
     description: 'Navigate an attached tab: goto, back, forward, or reload.',
     parameters: {
@@ -327,8 +601,11 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
 
   ctx.tools.register(defineTool({
     name: 'browser_snapshot',
-    description: 'Capture a ref-annotated accessibility outline of the attached tab.',
-    parameters: { tabId: { type: 'string', required: true } },
+    description: 'Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.',
+    parameters: {
+      tabId: { type: 'string', required: true },
+      frameId: { type: 'string', description: 'Frame id from browser_frames; defaults to the main frame.' },
+    },
     output: {
       schema: {
         type: 'object',
@@ -340,6 +617,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
           ...previewProperties,
           text: { type: 'string', required: true },
           truncated: { type: 'boolean', required: true },
+          frameId: { type: 'string' },
         },
       },
       render: (_args, value) => [{ type: 'text', text: formatSnapshot(value) }],
@@ -349,7 +627,13 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     isConcurrencySafe: () => true,
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, BrowserTabId(args.tabId), exec.signal), exec.signal)
+      return snapshotValue(
+        owner,
+        args.tabId,
+        await snapshotTab(owner, BrowserTabId(args.tabId), exec.signal, args.frameId),
+        exec.signal,
+        args.frameId,
+      )
     },
     presentCall: args => presentBrowserCall(`Snapshot ${args.tabId}`, 'fetch'),
     presentResult: () => presentBrowserResult('Snapshot'),
@@ -357,25 +641,39 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
 
   ctx.tools.register(defineTool({
     name: 'browser_text',
-    description: 'Read visible text from an attached tab.',
-    parameters: { tabId: { type: 'string', required: true } },
+    description: 'Read visible text from an attached tab or a selected frame.',
+    parameters: {
+      tabId: { type: 'string', required: true },
+      frameId: { type: 'string', description: 'Frame id from browser_frames; defaults to the main frame.' },
+    },
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
-        properties: { tabId: { type: 'string', required: true }, text: { type: 'string', required: true } },
+        properties: {
+          tabId: { type: 'string', required: true },
+          text: { type: 'string', required: true },
+          frameId: { type: 'string' },
+        },
       },
       render: (_args, value) => [{ type: 'text', text: value.text }],
     },
     timeoutMs: options.timeoutMs,
     isConcurrencySafe: () => true,
     execute: async (args, exec) => {
-      const cdp = cdpClient(ctx.browser, requireOwner(exec.agent), BrowserTabId(args.tabId), exec.signal)
+      const owner = requireOwner(exec.agent)
+      const tabId = BrowserTabId(args.tabId)
+      const frame = await requireFrame(owner, tabId, args.frameId, exec.signal)
+      const cdp = cdpFor(owner, tabId, exec.signal, frame)
       const result = await cdp.send('Runtime.evaluate', {
         expression: 'document.body?.innerText ?? ""',
         returnByValue: true,
       }) as { result?: { value?: string } }
-      return { tabId: args.tabId, text: result.result?.value ?? '' }
+      return {
+        tabId: args.tabId,
+        text: result.result?.value ?? '',
+        ...args.frameId !== undefined ? { frameId: args.frameId } : {},
+      }
     },
     presentCall: args => presentBrowserCall(`Text ${args.tabId}`, 'fetch'),
     presentResult: () => presentBrowserResult('Text'),
@@ -437,6 +735,8 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       ...previewProperties,
       text: { type: 'string', required: true },
       truncated: { type: 'boolean', required: true },
+      frameId: { type: 'string' },
+      observationError: { type: 'string' },
     },
   } as const
 
@@ -467,19 +767,20 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       let x = args.x
       let y = args.y
+      let frameId: string | undefined
       if (args.ref !== undefined) {
-        const state = tabState(args.tabId)
-        if (state.snapshot === undefined) throw new Error('take a browser_snapshot before clicking a ref')
-        const node = resolveRef(args.ref, state.snapshot)
-        if (node.backendNodeId === undefined) throw new Error(`snapshot ref "${args.ref}" has no backend node`)
-        const center = await nodeCenter(cdp, node.backendNodeId)
-        if (center === undefined) throw new Error(`snapshot ref "${args.ref}" has no box model`)
+        const node = resolveNode(args.tabId, args.ref)
+        frameId = node.frameId
+        const nodeCdp = await cdpForNode(owner, tabId, node, exec.signal)
+        const center = await pointFromNode(nodeCdp, node, args.ref)
         x = center.x
         y = center.y
+        await clickAt(nodeCdp, x, y)
+        return afterAction(owner, args.tabId, exec.signal, frameId)
       }
       if (x === undefined || y === undefined) throw new Error('browser_click needs a ref or x/y')
       await clickAt(cdp, x, y)
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal)
     },
     presentCall: args => presentBrowserCall(`Click ${args.ref ?? `${args.x},${args.y}`}`, 'execute'),
     presentResult: () => presentBrowserResult('Clicked'),
@@ -500,11 +801,12 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
       const tabId = BrowserTabId(args.tabId)
-      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      let cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      let frameId: string | undefined
       if (args.ref !== undefined) {
-        const state = tabState(args.tabId)
-        if (state.snapshot === undefined) throw new Error('take a browser_snapshot before typing into a ref')
-        const node = resolveRef(args.ref, state.snapshot)
+        const node = resolveNode(args.tabId, args.ref)
+        frameId = node.frameId
+        cdp = await cdpForNode(owner, tabId, node, exec.signal)
         if (node.backendNodeId !== undefined) {
           const center = await nodeCenter(cdp, node.backendNodeId)
           if (center !== undefined) await clickAt(cdp, center.x, center.y)
@@ -519,7 +821,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter' })
         await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter' })
       }
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal, frameId)
     },
     presentCall: args => presentBrowserCall(`Type ${args.text}`, 'execute'),
     presentResult: () => presentBrowserResult('Typed'),
@@ -541,7 +843,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: args.key, ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {} })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: args.key, ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {} })
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal)
     },
     presentCall: args => presentBrowserCall(`Key ${args.key}`, 'execute'),
     presentResult: () => presentBrowserResult('Key'),
@@ -568,10 +870,63 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         deltaX: args.deltaX ?? 0,
         deltaY: args.deltaY ?? 400,
       })
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal)
     },
     presentCall: () => presentBrowserCall('Scroll', 'execute'),
     presentResult: () => presentBrowserResult('Scrolled'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'browser_drag',
+    description: 'Drag from a snapshot ref or viewport point to another in the same frame using trusted pointer input.',
+    parameters: {
+      tabId: { type: 'string', required: true },
+      fromRef: { type: 'string', description: 'Snapshot ref for the press point.' },
+      fromX: { type: 'number', description: 'Viewport x for the press point when not using fromRef.' },
+      fromY: { type: 'number' },
+      toRef: { type: 'string', description: 'Snapshot ref for the release point.' },
+      toX: { type: 'number', description: 'Viewport x for the release point when not using toRef.' },
+      toY: { type: 'number' },
+    },
+    output: { schema: interactSchema, render: (_args, value) => [{ type: 'text', text: formatSnapshot(value) }], presentationMeta: commonMeta },
+    timeoutMs: options.timeoutMs,
+    execute: async (args, exec) => {
+      const owner = requireOwner(exec.agent)
+      const tabId = BrowserTabId(args.tabId)
+      await approveBrowserAction({
+        mode: options.approval,
+        kind: 'agent-tab',
+        ...approval !== undefined ? { approval } : {},
+        agent: owner,
+        toolName: 'browser_drag',
+        callId: exec.callId,
+        reason: `drag on tab ${args.tabId}`,
+        signal: exec.signal,
+      })
+      let from = args.fromX !== undefined && args.fromY !== undefined ? { x: args.fromX, y: args.fromY } : undefined
+      let to = args.toX !== undefined && args.toY !== undefined ? { x: args.toX, y: args.toY } : undefined
+      let fromFrame: string | undefined
+      let toFrame: string | undefined
+      let cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      if (args.fromRef !== undefined) {
+        const node = resolveNode(args.tabId, args.fromRef)
+        fromFrame = node.frameId
+        cdp = await cdpForNode(owner, tabId, node, exec.signal)
+        from = await pointFromNode(cdp, node, args.fromRef)
+      }
+      if (args.toRef !== undefined) {
+        const node = resolveNode(args.tabId, args.toRef)
+        toFrame = node.frameId
+        const nodeCdp = await cdpForNode(owner, tabId, node, exec.signal)
+        to = await pointFromNode(nodeCdp, node, args.toRef)
+      }
+      assertSameFrame(fromFrame, toFrame)
+      if (from === undefined || to === undefined) throw new Error('browser_drag needs fromRef/fromX,fromY and toRef/toX,toY')
+      await dragAt(cdp, from, to)
+      return afterAction(owner, args.tabId, exec.signal, fromFrame)
+    },
+    presentCall: args => presentBrowserCall(`Drag ${args.fromRef ?? `${args.fromX},${args.fromY}`}`, 'execute'),
+    presentResult: () => presentBrowserResult('Dragged'),
   }))
 
   ctx.tools.register(defineTool({
@@ -587,10 +942,8 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
       const tabId = BrowserTabId(args.tabId)
-      const state = tabState(args.tabId)
-      if (state.snapshot === undefined) throw new Error('take a browser_snapshot before selecting an option')
-      const node = resolveRef(args.ref, state.snapshot)
-      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      const node = resolveNode(args.tabId, args.ref)
+      const cdp = await cdpForNode(owner, tabId, node, exec.signal)
       if (node.backendNodeId !== undefined) {
         await cdp.send('DOM.focus', { backendNodeId: node.backendNodeId })
       }
@@ -598,7 +951,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         expression: `document.activeElement && [...document.activeElement.options].some(o => { if (o.text === ${JSON.stringify(args.value)} || o.value === ${JSON.stringify(args.value)}) { o.selected = true; document.activeElement.dispatchEvent(new Event('change', { bubbles: true })); return true } return false })`,
         returnByValue: true,
       })
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal, node.frameId)
     },
     presentCall: args => presentBrowserCall(`Select ${args.value}`, 'execute'),
     presentResult: () => presentBrowserResult('Selected'),
@@ -606,19 +959,21 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
 
   ctx.tools.register(defineTool({
     name: 'browser_wait_for',
-    description: 'Wait until text appears or a JS expression is truthy on an attached tab.',
+    description: 'Wait until text appears or a JS expression is truthy on an attached tab or selected frame.',
     parameters: {
       tabId: { type: 'string', required: true },
       text: { type: 'string' },
       expression: { type: 'string' },
       timeoutMs: { type: 'integer' },
+      frameId: { type: 'string', description: 'Frame id from browser_frames; defaults to the main frame.' },
     },
     output: { schema: interactSchema, render: (_args, value) => [{ type: 'text', text: formatSnapshot(value) }], presentationMeta: commonMeta },
     timeoutMs: options.timeoutMs,
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
       const tabId = BrowserTabId(args.tabId)
-      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      const frame = await requireFrame(owner, tabId, args.frameId, exec.signal)
+      const cdp = cdpFor(owner, tabId, exec.signal, frame)
       const deadline = Date.now() + (args.timeoutMs ?? 5000)
       while (Date.now() < deadline) {
         exec.signal.throwIfAborted()
@@ -640,7 +995,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         }
         await new Promise(resolve => setTimeout(resolve, 100))
       }
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal, args.frameId)
     },
     presentCall: args => presentBrowserCall(`Wait ${args.text ?? args.expression ?? ''}`, 'fetch'),
     presentResult: () => presentBrowserResult('Waited'),
@@ -648,10 +1003,11 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
 
   ctx.tools.register(defineTool({
     name: 'browser_evaluate',
-    description: 'Run a JavaScript expression in the attached tab and return a JSON value. Requires approval.',
+    description: 'Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.',
     parameters: {
       tabId: { type: 'string', required: true },
       expression: { type: 'string', required: true },
+      frameId: { type: 'string', description: 'Frame id from browser_frames; defaults to the main frame.' },
     },
     output: {
       schema: {
@@ -674,7 +1030,12 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
         reason: `evaluate JavaScript on tab ${args.tabId}`,
         signal: exec.signal,
       })
-      const cdp = cdpClient(ctx.browser, owner, BrowserTabId(args.tabId), exec.signal)
+      const cdp = cdpFor(
+        owner,
+        BrowserTabId(args.tabId),
+        exec.signal,
+        await requireFrame(owner, BrowserTabId(args.tabId), args.frameId, exec.signal),
+      )
       const result = await cdp.send('Runtime.evaluate', {
         expression: args.expression,
         returnByValue: true,
@@ -889,13 +1250,14 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
       const tabId = BrowserTabId(args.tabId)
-      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      let cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       let x = args.x
       let y = args.y
+      let frameId: string | undefined
       if (args.ref !== undefined) {
-        const state = tabState(args.tabId)
-        if (state.snapshot === undefined) throw new Error('take a browser_snapshot before hovering a ref')
-        const node = resolveRef(args.ref, state.snapshot)
+        const node = resolveNode(args.tabId, args.ref)
+        frameId = node.frameId
+        cdp = await cdpForNode(owner, tabId, node, exec.signal)
         if (node.backendNodeId !== undefined) {
           const center = await nodeCenter(cdp, node.backendNodeId)
           if (center !== undefined) {
@@ -906,7 +1268,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       }
       if (x === undefined || y === undefined) throw new Error('browser_hover needs a ref or x/y')
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal, frameId)
     },
     presentCall: () => presentBrowserCall('Hover', 'execute'),
     presentResult: () => presentBrowserResult('Hovered'),
@@ -954,13 +1316,11 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     execute: async (args, exec) => {
       const owner = requireOwner(exec.agent)
       const tabId = BrowserTabId(args.tabId)
-      const state = tabState(args.tabId)
-      if (state.snapshot === undefined) throw new Error('take a browser_snapshot before uploading')
-      const node = resolveRef(args.ref, state.snapshot)
+      const node = resolveNode(args.tabId, args.ref)
       if (node.backendNodeId === undefined) throw new Error(`snapshot ref "${args.ref}" has no backend node`)
-      const cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
+      const cdp = await cdpForNode(owner, tabId, node, exec.signal)
       await cdp.send('DOM.setFileInputFiles', { backendNodeId: node.backendNodeId, files: args.paths })
-      return snapshotValue(owner, args.tabId, await snapshotTab(owner, tabId, exec.signal), exec.signal)
+      return afterAction(owner, args.tabId, exec.signal, node.frameId)
     },
     presentCall: () => presentBrowserCall('Upload', 'execute'),
     presentResult: () => presentBrowserResult('Uploaded'),
@@ -1153,9 +1513,15 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
               type: 'object',
               additionalProperties: false,
               properties: {
+                id: { type: 'string', required: true },
                 filename: { type: 'string', required: true },
                 url: { type: 'string', required: true },
                 state: { type: 'string', required: true },
+                bytesReceived: { type: 'number' },
+                totalBytes: { type: 'number' },
+                exists: { type: 'boolean' },
+                error: { type: 'string' },
+                filePath: { type: 'string' },
               },
             },
           },
@@ -1163,16 +1529,89 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       },
       render: (_args, value) => [{
         type: 'text',
-        text: value.items.map(item => `- ${item.filename} (${item.state}) — ${item.url}`).join('\n') || '(no downloads)',
+        text: value.items.map(item => `- [${item.id}] ${item.filename} (${item.state}) — ${item.url}`).join('\n') || '(no downloads)',
       }],
     },
     timeoutMs: options.timeoutMs,
     isConcurrencySafe: () => true,
     execute: async (_args, exec) => {
       const items = await ctx.browser.listDownloads(exec.signal)
-      return { items: items.map(item => ({ filename: item.filename, url: item.url, state: item.state })) }
+      return {
+        items: items.map(item => ({
+          id: item.id,
+          filename: item.filename,
+          url: item.url,
+          state: item.state,
+          ...item.bytesReceived !== undefined ? { bytesReceived: item.bytesReceived } : {},
+          ...item.totalBytes !== undefined ? { totalBytes: item.totalBytes } : {},
+          ...item.exists !== undefined ? { exists: item.exists } : {},
+          ...item.error !== undefined ? { error: item.error } : {},
+          ...item.filePath !== undefined ? { filePath: item.filePath } : {},
+        })),
+      }
     },
     presentCall: () => presentBrowserCall('Downloads', 'fetch'),
     presentResult: () => presentBrowserResult('Downloads'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'browser_wait_for_download',
+    description: 'Wait until a Chrome download identified by browser_downloads completes. Returns the local path without reading or opening the file.',
+    parameters: {
+      downloadId: { type: 'string', required: true, description: 'Download id from browser_downloads.' },
+      timeoutMs: { type: 'number', description: 'How long to poll. Defaults to the tool timeout.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', required: true },
+          state: { type: 'string', required: true },
+          filename: { type: 'string', required: true },
+          url: { type: 'string', required: true },
+          filePath: { type: 'string' },
+          error: { type: 'string' },
+          bytesReceived: { type: 'number' },
+          totalBytes: { type: 'number' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.state === 'complete'
+          ? `Download complete: ${value.filePath ?? value.filename}`
+          : `Download ${value.state}: ${value.error ?? value.filename}`,
+      }],
+    },
+    timeoutMs: options.timeoutMs,
+    execute: async (args, exec) => {
+      const deadline = Date.now() + (args.timeoutMs ?? options.timeoutMs)
+      const id = BrowserDownloadId(args.downloadId)
+      let last: Awaited<ReturnType<typeof ctx.browser.getDownload>>
+      while (Date.now() <= deadline) {
+        last = await ctx.browser.getDownload(id, exec.signal)
+        if (last === undefined) {
+          throw new Error(`download "${args.downloadId}" is gone`)
+        }
+        if (last.state === 'complete') {
+          return {
+            id: last.id,
+            state: last.state,
+            filename: last.filename,
+            url: last.url,
+            ...last.filePath !== undefined ? { filePath: last.filePath } : {},
+            ...last.bytesReceived !== undefined ? { bytesReceived: last.bytesReceived } : {},
+            ...last.totalBytes !== undefined ? { totalBytes: last.totalBytes } : {},
+          }
+        }
+        if (last.state === 'interrupted') {
+          throw new BrowserError(last.error ?? `download "${args.downloadId}" was interrupted`, 'BROWSER_DOWNLOAD_INTERRUPTED')
+        }
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      throw new Error(`timed out waiting for download "${args.downloadId}"`)
+    },
+    presentCall: args => presentBrowserCall(`Wait for download ${args.downloadId}`, 'fetch'),
+    presentResult: () => presentBrowserResult('Download'),
   }))
 }

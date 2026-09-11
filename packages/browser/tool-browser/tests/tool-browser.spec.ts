@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
+  BrowserDownloadId,
   BrowserTabId,
   type BrowserCdpEvent,
   type BrowserProvider,
@@ -20,6 +21,9 @@ import {
   cdpClient,
   clickAt,
   createNetworkCapture,
+  dragAt,
+  flattenFrameTree,
+  assertSameFrame,
   formatNetworkBody,
   formatNetworkList,
   formatSnapshot,
@@ -109,7 +113,12 @@ function makeProvider(cdpImpl?: (method: string, params?: Readonly<Record<string
     createBookmark: item => Promise.resolve({ id: 'b2', title: item.title, url: item.url }),
     listReadingList: () => Promise.resolve([{ url: 'https://read.example', title: 'Read later', hasBeenRead: false }]),
     addReadingList: item => Promise.resolve({ url: item.url, title: item.title, hasBeenRead: false }),
-    listDownloads: () => Promise.resolve([{ id: 1, url: 'https://dl.example/a', filename: 'a.zip', state: 'complete' }]),
+    listDownloads: () => Promise.resolve([{
+      id: BrowserDownloadId('1'),
+      url: 'https://dl.example/a',
+      filename: 'a.zip',
+      state: 'complete',
+    }]),
     events,
     emit(event) {
       for (const listener of events) listener(event)
@@ -170,6 +179,28 @@ describe('snapshot builder', () => {
       { nodeId: '2', role: { value: 'button' }, name: { value: 'Once' } },
     ], { url: 'https://example.com', title: 'Home', epoch: 1, maxNodes: 8 })
     expect(dup.nodes.filter(node => node.role === 'button')).toHaveLength(1)
+    const framed = buildSnapshot(axTree().nodes, {
+      url: 'https://example.com',
+      title: 'Home',
+      epoch: 1,
+      maxNodes: 8,
+      frameId: 'child',
+    })
+    expect(framed.nodes[0]?.frameId).toBe('child')
+    expect(flattenFrameTree({
+      frame: { id: 'root', url: 'https://example.com', name: 'main', securityOrigin: 'https://example.com' },
+      childFrames: [
+        { frame: { id: 'child', parentId: 'root', url: 'https://other.example', name: '' } },
+        { frame: { id: 'nameless' } },
+      ],
+    })).toMatchObject([
+      { frameId: 'root', url: 'https://example.com', name: 'main' },
+      { frameId: 'child', parentFrameId: 'root', url: 'https://other.example' },
+      { frameId: 'nameless', parentFrameId: 'root', url: '' },
+    ])
+    expect(() => assertSameFrame('a', 'b')).toThrow(expect.objectContaining({ code: 'BROWSER_UNSUPPORTED_DRAG' }))
+    expect(() => assertSameFrame('a', 'a')).not.toThrow()
+    expect(() => assertSameFrame('a')).not.toThrow()
   })
 
   it('redacts autocomplete-marked fields and skips ignored generics', () => {
@@ -347,7 +378,20 @@ describe('presenters and CDP helpers', () => {
     })
     expect(presentBrowserResult('Opened', 'done').content?.[0]).toEqual({ type: 'text', text: 'done' })
     expect(browserMetaFromValue({ url: 'https://a', title: 'A', tabId: '1', screenshot: 'abc' }))
-      .toEqual({ url: 'https://a', title: 'A', tabId: '1', screenshot: 'abc' })
+      .toEqual({ url: 'https://a', title: 'A', tabId: '1' })
+    expect(browserMetaFromValue({
+      tabId: '1',
+      frameId: 'f1',
+      screenshotAttachmentId: 'sha256:ab',
+      observationError: 'gone',
+      operation: 'click',
+    })).toEqual({
+      tabId: '1',
+      frameId: 'f1',
+      screenshotAttachmentId: 'sha256:ab',
+      observationError: 'gone',
+      operation: 'click',
+    })
     expect(browserMetaFromValue({})).toEqual({})
     expect(formatSnapshot({ url: 'https://a', title: 'A', text: '- button', truncated: true }))
       .toContain('Snapshot truncated')
@@ -367,8 +411,26 @@ describe('presenters and CDP helpers', () => {
     expect(await pageIdentity(cdp)).toEqual({ url: 'https://page', title: 'Page' })
     await clickAt(cdp, 1, 2)
     await typeText(cdp, 'ab')
+    await dragAt(cdp, { x: 1, y: 2 }, { x: 8, y: 9 })
     expect(await nodeCenter(cdp, 9)).toEqual({ x: 5, y: 5 })
     expect(sent.some(item => item.method === 'Input.dispatchMouseEvent')).toBe(true)
+    const requests: unknown[] = []
+    const sessionCdp = cdpClient({
+      cdp: (_owner: unknown, request: unknown) => {
+        requests.push(request)
+        return Promise.resolve({})
+      },
+    } as never, agent(), BrowserTabId('1'), undefined, { sessionId: 'child', targetId: 't1' })
+    await sessionCdp.send('Runtime.evaluate', { expression: '1' })
+    expect(requests[0]).toMatchObject({ method: 'Runtime.evaluate', sessionId: 'child', targetId: 't1' })
+    const blankCdp = cdpClient({
+      cdp: (_owner: unknown, request: unknown) => {
+        requests.push(request)
+        return Promise.resolve({})
+      },
+    } as never, agent(), BrowserTabId('1'), undefined, { sessionId: '', targetId: '' })
+    await blankCdp.send('Page.enable')
+    expect(requests[1]).toEqual({ tabId: BrowserTabId('1'), method: 'Page.enable' })
     const empty = { send: () => Promise.resolve({}) }
     expect(await pageIdentity(empty)).toEqual({ url: '', title: '' })
     expect(await nodeCenter(empty, 1)).toBeUndefined()
@@ -595,19 +657,19 @@ describe('tool-browser plugin', () => {
       },
     })
     await ctx.browser.attach(owner, BrowserTabId('1'))
+    await call('browser_snapshot', { tabId: '1' })
+    expect((await call('browser_click', { tabId: '1', ref: '1-e1' })).isError).toBe(false)
+    expect((await call('browser_type', { tabId: '1', text: 'hi', ref: '2-e1', clear: true, submit: true })).isError).toBe(false)
+    expect((await call('browser_press_key', { tabId: '1', key: 'Enter', modifiers: 0 })).isError).toBe(false)
+    expect((await call('browser_press_key', { tabId: '1', key: 'Tab' })).isError).toBe(false)
+    expect((await call('browser_scroll', { tabId: '1', deltaY: 80 })).isError).toBe(false)
+    expect((await call('browser_hover', { tabId: '1', ref: '6-e1' })).isError).toBe(false)
+    expect((await call('browser_hover', { tabId: '1', x: 1, y: 1 })).isError).toBe(false)
     expect((await call('browser_click', { tabId: '1', x: 3, y: 4 })).isError).toBe(false)
     const noTarget = await call('browser_click', { tabId: '1' })
     expect(noTarget.isError).toBe(true)
     const stale = await call('browser_click', { tabId: '1', ref: '1-e0' })
     expect(stale.isError).toBe(true)
-    await call('browser_snapshot', { tabId: '1' })
-    expect((await call('browser_click', { tabId: '1', ref: '1-e1' })).isError).toBe(false)
-    expect((await call('browser_type', { tabId: '1', text: 'hi', ref: '1-e1', clear: true, submit: true })).isError).toBe(false)
-    expect((await call('browser_press_key', { tabId: '1', key: 'Enter', modifiers: 0 })).isError).toBe(false)
-    expect((await call('browser_press_key', { tabId: '1', key: 'Tab' })).isError).toBe(false)
-    expect((await call('browser_scroll', { tabId: '1', deltaY: 80 })).isError).toBe(false)
-    expect((await call('browser_hover', { tabId: '1', ref: '1-e1' })).isError).toBe(false)
-    expect((await call('browser_hover', { tabId: '1', x: 1, y: 1 })).isError).toBe(false)
   })
 
   it('selects, waits, evaluates, and handles dialogs and uploads', async () => {
@@ -637,7 +699,8 @@ describe('tool-browser plugin', () => {
     })
     expect(emptyEval.isError).toBe(false)
     expect((await call('browser_handle_dialog', { tabId: '1', accept: true, promptText: 'ok' })).isError).toBe(false)
-    expect((await call('browser_upload', { tabId: '1', ref: '1-e1', paths: ['/tmp/a'] })).isError).toBe(false)
+    await call('browser_snapshot', { tabId: '1' })
+    expect((await call('browser_upload', { tabId: '1', ref: '4-e1', paths: ['/tmp/a'] })).isError).toBe(false)
   })
 
   it('surfaces evaluate exceptions and missing agents', async () => {
@@ -740,6 +803,10 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_reading_list', { title: 'R', url: 'https://r.example' })).isError).toBe(false)
     expect((await call('browser_reading_list', {})).isError).toBe(false)
     expect((await call('browser_downloads', {})).isError).toBe(false)
+    expect((await call('browser_wait_for_download', { downloadId: '1' })).value).toMatchObject({
+      state: 'complete',
+    })
+    expect((await call('browser_status', {})).value).toMatchObject({ available: true, connection: 'live' })
   })
 
   it('captures requests for an armed tab and reads a response body', async () => {
@@ -924,9 +991,11 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_hover', { tabId: '1', ref: '1-e0' })).isError).toBe(true)
     expect((await call('browser_upload', { tabId: '1', ref: '1-e0', paths: ['/tmp/a'] })).isError).toBe(true)
     const presenterArgs: Record<string, Record<string, unknown>> = {
+      browser_status: {},
       browser_tabs: {},
       browser_open: { url: 'https://example.com' },
       browser_attach: { tabId: '1' },
+      browser_frames: { tabId: '1' },
       browser_navigate: { tabId: '1', action: 'reload' },
       browser_snapshot: { tabId: '1' },
       browser_text: { tabId: '1' },
@@ -935,6 +1004,7 @@ describe('tool-browser plugin', () => {
       browser_type: { tabId: '1', text: 'hi' },
       browser_press_key: { tabId: '1', key: 'Enter' },
       browser_scroll: { tabId: '1' },
+      browser_drag: { tabId: '1', fromX: 1, fromY: 1, toX: 2, toY: 2 },
       browser_select_option: { tabId: '1', ref: '1-e0', value: 'A' },
       browser_wait_for: { tabId: '1', text: 'x' },
       browser_evaluate: { tabId: '1', expression: '1' },
@@ -950,6 +1020,7 @@ describe('tool-browser plugin', () => {
       browser_bookmarks: {},
       browser_reading_list: {},
       browser_downloads: {},
+      browser_wait_for_download: { downloadId: '1' },
     }
     const dummyResult = { isError: false, content: [] }
     for (const schema of ctx.tools.schemas()) {
@@ -969,12 +1040,19 @@ describe('tool-browser plugin', () => {
         requestId: 'r1', encoding: 'utf8', body: 'hi',
         truncated: true, bytes: 2, mimeType: 'image/png',
         result: null, text: '', url: 'u', title: 't', tabId: '1',
+        operations: ['listTabs'], unsupportedOperations: ['listDownloads'],
+        issues: [{ code: 'X', message: 'm', recovery: 'r' }],
+        connection: 'live', available: true, id: '1', state: 'complete', filename: 'a.zip',
+        frames: [{ frameId: 'root', url: 'https://example.com' }],
       })
       tool?.output.render(args, {
         tabs: [], messages: [], items: [{ title: 'Folder' }], requests: [],
         requestId: 'r1', encoding: 'base64',
         truncated: false, bytes: 2, mimeType: 'image/png',
         result: 1, value: 1, text: 'x', url: 'u', title: 't', tabId: '1',
+        operations: [], unsupportedOperations: [], issues: [],
+        connection: 'unconfigured', available: false, id: '1', state: 'interrupted', filename: 'a.zip', error: 'failed',
+        frames: [],
       })
     }
     ctx.tools.get('browser_wait_for')?.presentCall?.({ tabId: '1', expression: '1' })
@@ -996,7 +1074,10 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_hover', { tabId: '1', ref: 'nope' })).isError).toBe(true)
     expect((await call('browser_hover', { tabId: '1', ref: '1-e1' })).isError).toBe(true)
     expect((await call('browser_handle_dialog', { tabId: '1', accept: false })).isError).toBe(false)
-    expect((await call('browser_upload', { tabId: '1', ref: '1-e1', paths: ['/tmp/a'] })).isError).toBe(false)
+    const uploadSnap = await call('browser_snapshot', { tabId: '1' })
+    const uploadRef = /\[(\d+-e1)\]/.exec(textOf(uploadSnap))?.[1]
+    expect(uploadRef).toBeDefined()
+    expect((await call('browser_upload', { tabId: '1', ref: uploadRef!, paths: ['/tmp/a'] })).isError).toBe(false)
     expect((await call('browser_snapshot', { tabId: '1' })).isError).toBe(false)
     expect((await call('browser_cdp', { tabId: '1', method: 'Page.enable' })).isError).toBe(false)
     ctx.tools.get('browser_cdp')?.output.render({ tabId: '1', method: 'Page.enable' }, { tabId: '1', result: null })
@@ -1011,10 +1092,20 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_history_search', { query: 'none' })).content[0]).toMatchObject({ type: 'text' })
     expect((await call('browser_type', { tabId: '1', text: 'solo' })).isError).toBe(false)
     expect((await call('browser_press_key', { tabId: '1', key: 'a' })).isError).toBe(false)
-    expect((await call('browser_select_option', { tabId: '1', ref: '1-e1', value: 'A' })).isError).toBe(false)
-    expect((await call('browser_type', { tabId: '1', text: 'root', ref: '1-e0' })).isError).toBe(false)
-    expect((await call('browser_select_option', { tabId: '1', ref: '1-e0', value: 'A' })).isError).toBe(false)
-    expect((await call('browser_upload', { tabId: '1', ref: '1-e0', paths: ['/tmp/a'] })).isError).toBe(true)
+    const laterSnap = await call('browser_snapshot', { tabId: '1' })
+    const laterE1 = /\[(\d+-e1)\]/.exec(textOf(laterSnap))?.[1]
+    const laterE0 = /\[(\d+-e0)\]/.exec(textOf(laterSnap))?.[1]
+    expect(laterE1).toBeDefined()
+    expect(laterE0).toBeDefined()
+    expect((await call('browser_type', { tabId: '1', text: 'root', ref: laterE0! })).isError).toBe(false)
+    const afterType = await call('browser_snapshot', { tabId: '1' })
+    const afterTypeE1 = /\[(\d+-e1)\]/.exec(textOf(afterType))?.[1]
+    const afterTypeE0 = /\[(\d+-e0)\]/.exec(textOf(afterType))?.[1]
+    expect((await call('browser_select_option', { tabId: '1', ref: afterTypeE1!, value: 'A' })).isError).toBe(false)
+    const afterSelect = await call('browser_snapshot', { tabId: '1' })
+    const afterSelectE0 = /\[(\d+-e0)\]/.exec(textOf(afterSelect))?.[1]
+    expect((await call('browser_select_option', { tabId: '1', ref: afterSelectE0!, value: 'A' })).isError).toBe(false)
+    expect((await call('browser_upload', { tabId: '1', ref: afterSelectE0!, paths: ['/tmp/a'] })).isError).toBe(true)
     ctx.tools.get('browser_bookmarks')?.output.render({}, { items: [] })
     ctx.tools.get('browser_reading_list')?.output.render({}, { items: [] })
     ctx.tools.get('browser_history_search')?.output.render({ query: 'q' }, { items: [] })
@@ -1046,6 +1137,7 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_open', { url: 'https://example.com/new' })).isError).toBe(false)
     expect((await call('browser_evaluate', { tabId: '1', expression: '1' })).isError).toBe(false)
     expect((await call('browser_click', { tabId: '1', x: 1, y: 2 })).isError).toBe(false)
+    expect((await call('browser_drag', { tabId: '1', fromX: 1, fromY: 1, toX: 8, toY: 9 })).isError).toBe(false)
     expect(request).toHaveBeenCalled()
     expect((await call('browser_cdp', { tabId: '1', method: 'Page.enable', params: { a: 1 } })).isError).toBe(false)
     expect((await call('browser_wait_for', { tabId: '1', expression: '0', timeoutMs: 1 })).isError).toBe(false)
@@ -1063,6 +1155,355 @@ describe('tool-browser plugin', () => {
     })
     const listed = await emptyTabs.call('browser_tabs', {})
     expect(textOf(listed)).toBe('(no tabs)')
+  })
+
+  it('lists frames, snapshots a child, and drags inside one frame', async () => {
+    const sent: { method: string; params?: Readonly<Record<string, unknown>>; sessionId?: string }[] = []
+    const { call, owner, ctx, provider } = await mount({
+      cdp: (method, params) => {
+        sent.push({ method, ...params !== undefined ? { params } : {} })
+        if (method === 'Page.getFrameTree') {
+          return {
+            frameTree: {
+              frame: { id: 'root', url: 'https://example.com' },
+              childFrames: [{ frame: { id: 'child', parentId: 'root', name: 'ad', url: 'https://other.example' } }],
+            },
+          }
+        }
+        if (method === 'Runtime.evaluate') {
+          return { result: { value: { url: 'https://other.example', title: 'Ad' } } }
+        }
+        if (method === 'Accessibility.getFullAXTree') return axTree()
+        if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const frames = await call('browser_frames', { tabId: '1' })
+    expect(frames.value).toMatchObject({
+      frames: [
+        { frameId: 'root', url: 'https://example.com' },
+        { frameId: 'child', parentFrameId: 'root', name: 'ad' },
+      ],
+    })
+    expect(textOf(frames)).toContain('(main)')
+    const snap = await call('browser_snapshot', { tabId: '1', frameId: 'child' })
+    expect(snap.isError).toBe(false)
+    expect(sent.some(item => item.method === 'Accessibility.getFullAXTree' && item.params?.frameId === 'child')).toBe(true)
+    const missing = await call('browser_snapshot', { tabId: '1', frameId: 'gone' })
+    expect(missing.isError).toBe(true)
+    await call('browser_snapshot', { tabId: '1' })
+    const dragged = await call('browser_drag', { tabId: '1', fromRef: '1-e1', toX: 4, toY: 5 })
+    expect(dragged.isError).toBe(false)
+    expect((await call('browser_drag', { tabId: '1', fromX: 1, fromY: 1, toX: 8, toY: 9 })).isError).toBe(false)
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 's1', targetInfo: { targetId: 't1', type: 'iframe', url: 'https://other.example' } },
+      sessionId: 's1',
+    })
+    const childSnap = await call('browser_snapshot', { tabId: '1', frameId: 'child' })
+    expect(childSnap.isError).toBe(false)
+    expect(sent.some(item => item.method === 'Accessibility.getFullAXTree' && item.params?.frameId === undefined)).toBe(true)
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Page.frameNavigated',
+      params: { frame: { id: 'child' } },
+    })
+    const stale = await call('browser_click', { tabId: '1', ref: '1-e1' })
+    expect(stale.isError).toBe(true)
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.detachedFromTarget',
+      params: { sessionId: 's1' },
+      sessionId: 's1',
+    })
+  })
+
+  it('returns observationError when the post-click snapshot fails', async () => {
+    const { call, owner, ctx } = await mount({
+      cdp: (method) => {
+        if (method === 'Page.enable') return Promise.reject(new Error('tree gone'))
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const clicked = await call('browser_click', { tabId: '1', x: 1, y: 2 })
+    expect(clicked.isError).toBe(false)
+    expect(clicked.value).toMatchObject({ observationError: expect.stringContaining('tree gone') })
+  })
+
+  it('stringifies a non-Error observationError', async () => {
+    const { call, owner, ctx } = await mount({
+      cdp: (method) => {
+        if (method === 'Page.enable') return Promise.reject('tree-string')
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const clicked = await call('browser_click', { tabId: '1', x: 1, y: 2 })
+    expect(clicked.isError).toBe(false)
+    expect(clicked.value).toMatchObject({ observationError: 'tree-string' })
+  })
+
+  it('records observationError with a frameId when the follow-up snapshot fails', async () => {
+    let enables = 0
+    const { call, owner, ctx } = await mount({
+      cdp: (method) => {
+        if (method === 'Page.enable') {
+          enables += 1
+          if (enables > 1) return Promise.reject(new Error('tree gone'))
+        }
+        if (method === 'Page.getFrameTree') {
+          return {
+            frameTree: {
+              frame: { id: 'root', url: 'https://example.com' },
+              childFrames: [{ frame: { id: 'child', url: 'https://other.example' } }],
+            },
+          }
+        }
+        if (method === 'Runtime.evaluate') return { result: { value: true } }
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const waited = await call('browser_wait_for', { tabId: '1', expression: 'true', frameId: 'child', timeoutMs: 50 })
+    expect(waited.isError).toBe(false)
+    expect(waited.value).toMatchObject({ observationError: 'tree gone', frameId: 'child' })
+  })
+
+  it('waits for download completion, interruption, absence, and timeout', async () => {
+    const items = [{
+      id: BrowserDownloadId('1'),
+      url: 'https://dl.example/a',
+      filename: 'a.zip',
+      state: 'in_progress' as const,
+    }]
+    const { call, ctx } = await mount({
+      config: { approval: 'never', timeoutMs: 30_000 },
+      provider: {
+        ...makeProvider(),
+        listDownloads: () => Promise.resolve(items),
+        getDownload: (id) => Promise.resolve(items.find(item => item.id === id)),
+      },
+    })
+    const gone = await call('browser_wait_for_download', { downloadId: 'missing', timeoutMs: 1 })
+    expect(gone.isError).toBe(true)
+    const timed = await call('browser_wait_for_download', { downloadId: '1', timeoutMs: 1 })
+    expect(timed.isError).toBe(true)
+    items[0] = { ...items[0]!, state: 'interrupted', error: undefined }
+    const interruptedBare = await call('browser_wait_for_download', { downloadId: '1', timeoutMs: 50 })
+    expect(interruptedBare.isError).toBe(true)
+    items[0] = { ...items[0]!, state: 'interrupted', error: 'network' }
+    const interrupted = await call('browser_wait_for_download', { downloadId: '1', timeoutMs: 50 })
+    expect(interrupted.isError).toBe(true)
+    items[0] = { ...items[0]!, state: 'complete', filePath: undefined }
+    const doneBare = await call('browser_wait_for_download', { downloadId: '1' })
+    expect(doneBare.value).toMatchObject({ state: 'complete' })
+    items[0] = { ...items[0]!, state: 'complete', filePath: '/tmp/a.zip', bytesReceived: 10, totalBytes: 10 }
+    const done = await call('browser_wait_for_download', { downloadId: '1' })
+    expect(done.value).toMatchObject({ state: 'complete', filePath: '/tmp/a.zip' })
+    const renderDownload = ctx.tools.get('browser_wait_for_download')!.output.render
+    expect(textOf({ content: renderDownload(
+      { downloadId: '1' },
+      { id: '1', state: 'complete', filename: 'a.zip', url: 'https://dl.example/a' },
+    ) })).toContain('a.zip')
+    expect(textOf({ content: renderDownload(
+      { downloadId: '1' },
+      { id: '1', state: 'complete', filename: 'a.zip', url: 'https://dl.example/a', filePath: '/tmp/a.zip' },
+    ) })).toContain('/tmp/a.zip')
+    expect(textOf({ content: renderDownload(
+      { downloadId: '1' },
+      { id: '1', state: 'interrupted', filename: 'a.zip', url: 'https://dl.example/a' },
+    ) })).toContain('interrupted')
+    const status = await call('browser_status', {})
+    expect(status.value).toMatchObject({ available: true, connection: 'live' })
+  })
+
+  it('covers frame sessions, drag refs, status issues, and missing drag endpoints', async () => {
+    const { call, owner, ctx, provider } = await mount({
+      cdp: (method, params) => {
+        if (method === 'Page.getFrameTree') {
+          return {
+            frameTree: {
+              frame: { id: 'root', url: 'https://example.com', securityOrigin: 'https://example.com' },
+              childFrames: [{ frame: { id: 'child', url: 'https://other.example' } }],
+            },
+          }
+        }
+        if (method === 'Runtime.evaluate') {
+          const expression = String(params?.expression ?? '')
+          if (expression.includes('innerText')) return { result: { value: 'hello' } }
+          if (expression === 'true' || expression === '1') return { result: { value: true } }
+          return { result: { value: { url: 'https://example.com', title: 'Home' } } }
+        }
+        if (method === 'Accessibility.getFullAXTree') return axTree()
+        if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { targetInfo: { targetId: 't1', type: 'iframe', url: 'https://other.example' } },
+      sessionId: 's1',
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 's-empty', targetInfo: { targetId: 1, url: true, type: 2 } },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { targetInfo: { type: 'iframe', url: 'https://other.example' } },
+      sessionId: '',
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 's2', targetInfo: null },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 's3', targetInfo: 'nope' },
+    })
+    expect((await call('browser_frames', { tabId: '1' })).isError).toBe(false)
+    expect((await call('browser_text', { tabId: '1', frameId: 'child' })).isError).toBe(false)
+    expect((await call('browser_evaluate', { tabId: '1', expression: '1', frameId: 'child' })).isError).toBe(false)
+    expect((await call('browser_wait_for', { tabId: '1', expression: 'true', frameId: 'child', timeoutMs: 50 })).isError).toBe(false)
+    const snap = await call('browser_snapshot', { tabId: '1', frameId: 'child' })
+    const e0 = /\[(\d+-e0)\]/.exec(textOf(snap))?.[1]
+    expect((await call('browser_click', { tabId: '1', ref: e0 })).isError).toBe(true)
+    expect((await call('browser_upload', { tabId: '1', ref: e0!, paths: ['/tmp/a'] })).isError).toBe(true)
+    expect((await call('browser_hover', { tabId: '1', ref: e0, x: 1, y: 1 })).isError).toBe(false)
+    const afterHover = await call('browser_snapshot', { tabId: '1' })
+    const typedE0 = /\[(\d+-e0)\]/.exec(textOf(afterHover))?.[1]
+    expect((await call('browser_type', { tabId: '1', ref: typedE0, text: 'x' })).isError).toBe(false)
+    const afterType = await call('browser_snapshot', { tabId: '1' })
+    const typedE1 = /\[(\d+-e1)\]/.exec(textOf(afterType))?.[1]
+    expect((await call('browser_drag', { tabId: '1' })).isError).toBe(true)
+    expect((await call('browser_drag', { tabId: '1', fromRef: typedE1, toRef: typedE1 })).isError).toBe(false)
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.detachedFromTarget',
+      params: {},
+      sessionId: 's1',
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Page.frameDetached',
+      params: { frameId: 'child' },
+    })
+    expect((await call('browser_status', {})).value).toMatchObject({ connection: 'live' })
+    expect((await call('browser_downloads', {})).isError).toBe(false)
+  })
+
+  it('types and hovers a ref that has no box model', async () => {
+    const { call, owner, ctx } = await mount({
+      cdp: (method) => {
+        if (method === 'Accessibility.getFullAXTree') return axTree()
+        if (method === 'Runtime.evaluate') return { result: { value: { url: 'https://example.com', title: 'Home' } } }
+        if (method === 'DOM.getBoxModel') return {}
+        return {}
+      },
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const snap = await call('browser_snapshot', { tabId: '1' })
+    const e1 = /\[(\d+-e1)\]/.exec(textOf(snap))?.[1]
+    expect(e1).toBeDefined()
+    expect((await call('browser_type', { tabId: '1', ref: e1, text: 'x' })).isError).toBe(false)
+    const again = await call('browser_snapshot', { tabId: '1' })
+    const hoverRef = /\[(\d+-e1)\]/.exec(textOf(again))?.[1]
+    expect((await call('browser_hover', { tabId: '1', ref: hoverRef, x: 1, y: 1 })).isError).toBe(false)
+  })
+
+  it('renders an empty frame list when CDP returns no tree', async () => {
+    const { call, owner, ctx } = await mount({
+      cdp: () => ({}),
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    const frames = await call('browser_frames', { tabId: '1' })
+    expect(textOf(frames)).toBe('(no frames)')
+  })
+
+  it('reports status issues when the live probe fails', async () => {
+    const { call } = await mount({
+      provider: {
+        ...makeProvider(),
+        listTabs: () => Promise.reject(new Error('down')),
+      },
+    })
+    const status = await call('browser_status', {})
+    expect(status.value).toMatchObject({ connection: 'probe-failed' })
+    expect((status.value as { issues: { code: string }[] }).issues[0]?.code).toBeTruthy()
+  })
+
+  it('omits selectedProvider when no browser backend is registered', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(BrowserRuntime)
+    await ctx.plugin(ToolBrowser, { approval: 'never' })
+    const status = await ctx.tools.execute({
+      signal,
+      callId: ToolCallId('status-unconfigured'),
+      name: 'browser_status',
+      arguments: {},
+      agent: agent(),
+    })
+    expect(status.value).toMatchObject({ available: false, connection: 'unconfigured' })
+    expect(status.value).not.toHaveProperty('selectedProvider')
+    expect(textOf(status)).toContain('(none)')
+  })
+
+  it('includes configuredProvider when the seam pins a provider id', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(BrowserRuntime, { provider: 'fake' })
+    ctx.browser.registerProvider(makeProvider())
+    await ctx.plugin(ToolBrowser, { approval: 'never' })
+    const status = await ctx.tools.execute({
+      signal,
+      callId: ToolCallId('status-configured'),
+      name: 'browser_status',
+      arguments: {},
+      agent: agent(),
+    })
+    expect(status.value).toMatchObject({ configuredProvider: 'fake', selectedProvider: 'fake' })
+  })
+
+  it('copies optional download fields into the tool value', async () => {
+    const { call } = await mount({
+      provider: {
+        ...makeProvider(),
+        listDownloads: () => Promise.resolve([{
+          id: BrowserDownloadId('1'),
+          url: 'https://dl.example/a',
+          filename: 'a.zip',
+          state: 'interrupted',
+          bytesReceived: 10,
+          totalBytes: 20,
+          exists: false,
+          error: 'network',
+          filePath: '/tmp/a.zip',
+        }]),
+      },
+    })
+    const listed = await call('browser_downloads', {})
+    expect(listed.value).toMatchObject({
+      items: [{
+        id: '1',
+        bytesReceived: 10,
+        totalBytes: 20,
+        exists: false,
+        error: 'network',
+        filePath: '/tmp/a.zip',
+      }],
+    })
   })
 })
 

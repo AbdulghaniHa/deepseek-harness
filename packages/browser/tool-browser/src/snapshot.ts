@@ -23,6 +23,7 @@ export interface SnapshotNode {
   readonly name: string
   readonly value?: string
   readonly backendNodeId?: number
+  readonly frameId?: string
 }
 
 /** Built snapshot plus the epoch used to mint refs. */
@@ -52,6 +53,7 @@ export function buildSnapshot(nodes: readonly AxNode[], options: {
   readonly title: string
   readonly epoch: number
   readonly maxNodes: number
+  readonly frameId?: string
 }): BrowserSnapshot {
   const byId = new Map(nodes.map(node => [node.nodeId ?? '', node]))
   const collected: SnapshotNode[] = []
@@ -79,6 +81,7 @@ export function buildSnapshot(nodes: readonly AxNode[], options: {
           name,
           ...rawValue !== undefined ? { value: secret ? '<redacted>' : rawValue } : {},
           ...node.backendDOMNodeId !== undefined ? { backendNodeId: node.backendDOMNodeId } : {},
+          ...options.frameId !== undefined ? { frameId: options.frameId } : {},
         })
       }
     }

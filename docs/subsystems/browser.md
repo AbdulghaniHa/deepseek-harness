@@ -35,6 +35,7 @@ interface BrowserProvider {
   listReadingList?(signal?: AbortSignal): Promise<readonly BrowserReadingListItem[]>
   addReadingList?(item: { readonly title: string; readonly url: string }, signal?: AbortSignal): Promise<BrowserReadingListItem>
   listDownloads?(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>
+  getDownload?(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined>
 }
 ```
 
@@ -62,11 +63,15 @@ interface BrowserOpenTabRequest {
 ```
 
 ```ts type-equiv
-/** One CDP command against an attached tab. */
+/** One CDP command against an attached tab, optionally a child debugger session. */
 interface BrowserCdpRequest {
   readonly tabId: BrowserTabId
   readonly method: string
   readonly params?: Readonly<Record<string, unknown>>
+  /** Flattened CDP session for a child target; omitted uses the tab session. */
+  readonly sessionId?: string
+  /** Chrome debugger target id when the command must not use the tab debuggee. */
+  readonly targetId?: string
 }
 ```
 
@@ -86,7 +91,7 @@ interface BrowserPreview {
 
 ## Errors
 
-`BrowserError` extends `HarnessError` with an open-string `code`. Shared codes cover unavailable, missing, unusable, ambiguous, or duplicate providers, a disconnected host, a vanished tab, a stale snapshot ref, and foreign-owner attachment use.
+`BrowserError` extends `HarnessError` with an open-string `code`. Shared codes cover unavailable, missing, unusable, ambiguous, or duplicate providers, a disconnected host, a vanished tab, a detached or navigated frame, a stale snapshot ref, an unsupported drag target, an interrupted download, and foreign-owner attachment use.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -207,6 +212,15 @@ onCdpEvent(listener: (event: BrowserCdpEvent) => void): () => void
 capabilities(): readonly BrowserCapability[]
 
 /**
+ * Read-only discovery of the selected provider. Distinguishes a cheap
+ * `available()` check from a bounded live `listTabs` probe. Never throws
+ * for a missing, ambiguous, or disconnected provider.
+ * @param signal - optional cancellation forwarded to the live probe.
+ * @returns configured vs live status, advertised operations, and recovery.
+ */
+async status(signal?: AbortSignal): Promise<BrowserStatus>
+
+/**
  * Search browsing history through the optional history facet.
  * @param query - history search string.
  * @param signal - optional cancellation forwarded to the provider.
@@ -250,6 +264,14 @@ async addReadingList(item: { readonly title: string; readonly url: string }, sig
  * @returns download items.
  */
 async listDownloads(signal?: AbortSignal): Promise<readonly BrowserDownloadItem[]>
+
+/**
+ * Read one download through the optional downloads facet.
+ * @param id - branded download id from {@link listDownloads}.
+ * @param signal - optional cancellation forwarded to the provider.
+ * @returns the download, or undefined when Chrome no longer has it.
+ */
+async getDownload(id: BrowserDownloadId, signal?: AbortSignal): Promise<BrowserDownloadItem | undefined>
 
 /**
  * Attachments currently held by `owner`.

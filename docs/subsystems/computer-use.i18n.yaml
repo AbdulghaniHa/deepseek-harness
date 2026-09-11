@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/computer-use.md
-computer-use.md: 60839d6c8a0f954f4207ffd87f9fbbe60a103616
-computer-use.zh.md: 833332616be23032890438d0b5ed41c22a1f9614
+computer-use.md: ace97a76488622b926d822facce452a008c42040
+computer-use.zh.md: ec7bd7815b581918d79a3f929984533660f42463
