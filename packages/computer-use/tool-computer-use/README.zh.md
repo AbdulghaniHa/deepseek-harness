@@ -42,7 +42,6 @@ kind: "package-reference"
 | `approval` | `apps` | `always`、`apps` 或 `never` |
 | `grantScope` | `session` | 首次使用时提供的默认时长 |
 | `snapshotMaxNodes` | `200` | 无障碍节点上限 |
-| `screenshotMaxWidth` | `1280` | 截图坐标的逻辑最大宽度 |
 | `screenshotMaxBytes` | `1000000` | 编码截图字节上限 |
 | `timeoutMs` | `30000` | 协作式工具超时 |
 | `allowScreenCapture` | `true` | 为 false 时 `computer_screenshot` 拒绝 |

@@ -46,8 +46,16 @@ describe('native host paths and manifest', () => {
     expect(manifestFile(nativeHostManifestPath('brave', 'darwin', '/Users/me'))).toContain('Brave-Browser')
     expect(nativeHostManifestPath('chrome', 'win32', 'C:\\Users\\me')).toEqual({
       kind: 'registry',
-      key: windowsRegistryKey('chrome'),
+      key: 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.deepseek.dsh.browser',
     })
+    // Each browser opens a vendor/product key pair, not one flattened name:
+    // a single "Google Chrome" or "BraveSoftware Brave-Browser" key never matches.
+    expect(windowsRegistryKey('chromium'))
+      .toBe('HKCU\\Software\\Chromium\\NativeMessagingHosts\\com.deepseek.dsh.browser')
+    expect(windowsRegistryKey('edge'))
+      .toBe('HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.deepseek.dsh.browser')
+    expect(windowsRegistryKey('brave'))
+      .toBe('HKCU\\Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\com.deepseek.dsh.browser')
     expect(BROWSER_KINDS).toContain('chrome')
   })
 

@@ -2891,8 +2891,6 @@ export interface Config {
   grantScope?: 'once' | 'session'
   /** Upper bound on accessibility nodes in one snapshot. */
   snapshotMaxNodes?: number
-  /** Logical max width used to scale screenshot coordinates. */
-  screenshotMaxWidth?: number
   /** Upper bound on a screenshot's encoded byte size. */
   screenshotMaxBytes?: number
   /** Cooperative timeout budget (ms) for computer tools. */

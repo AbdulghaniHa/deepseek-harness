@@ -54,9 +54,6 @@ export const DEFAULT_COMPUTER_TOOL_TIMEOUT_MS = 30_000
 /** Default cap on accessibility nodes in one snapshot. */
 export const DEFAULT_SNAPSHOT_MAX_NODES = 200
 
-/** Default max screenshot width in pixels before logical downscale. */
-export const DEFAULT_SCREENSHOT_MAX_WIDTH = 1280
-
 /** Default cap on a screenshot's encoded size. */
 export const DEFAULT_SCREENSHOT_MAX_BYTES = 1_000_000
 
@@ -70,8 +67,6 @@ export interface Config {
   grantScope?: 'once' | 'session'
   /** Upper bound on accessibility nodes in one snapshot. */
   snapshotMaxNodes?: number
-  /** Logical max width used to scale screenshot coordinates. */
-  screenshotMaxWidth?: number
   /** Upper bound on a screenshot's encoded byte size. */
   screenshotMaxBytes?: number
   /** Cooperative timeout budget (ms) for computer tools. */
@@ -87,7 +82,6 @@ export const Config: z<Config> = z.object({
   approval: z.union(['always', 'apps', 'never'] as const).default('apps'),
   grantScope: z.union(['once', 'session'] as const).default('session'),
   snapshotMaxNodes: z.number().default(DEFAULT_SNAPSHOT_MAX_NODES),
-  screenshotMaxWidth: z.number().default(DEFAULT_SCREENSHOT_MAX_WIDTH),
   screenshotMaxBytes: z.number().default(DEFAULT_SCREENSHOT_MAX_BYTES),
   timeoutMs: z.number().default(DEFAULT_COMPUTER_TOOL_TIMEOUT_MS),
   deniedApps: z.array(z.string()).default([]),
@@ -112,7 +106,6 @@ function assertPositiveInteger(field: string, value: number): void {
 export function apply(ctx: Context, config: Config): void {
   const resolved = config as ResolvedConfig
   assertPositiveInteger('snapshotMaxNodes', resolved.snapshotMaxNodes)
-  assertPositiveInteger('screenshotMaxWidth', resolved.screenshotMaxWidth)
   assertPositiveInteger('screenshotMaxBytes', resolved.screenshotMaxBytes)
   assertPositiveInteger('timeoutMs', resolved.timeoutMs)
   if (!resolved.enabled) return

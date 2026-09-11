@@ -1,0 +1,9 @@
+{
+  "name": "com.deepseek.dsh.browser",
+  "description": "DeepSeek Harness Chrome native messaging host",
+  "path": "C:\\Users\\Abdulghani\\Projects\\deepseek-harness\\packages\\browser\\browser-chrome-extension\\bin\\dsh-browser-host.cmd",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://nnpgededjoagoecoiloajlimodbccgee/"
+  ]
+}
