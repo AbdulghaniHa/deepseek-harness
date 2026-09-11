@@ -15,6 +15,7 @@ import {
   type ComputerKeyRequest,
   type ComputerLaunchRequest,
   type ComputerPermissions,
+  type ComputerPoint,
   type ComputerProvider,
   type ComputerScreenshot,
   type ComputerScreenshotRequest,
@@ -164,7 +165,7 @@ export class LocalComputerProvider implements ComputerProvider {
     await this.client.call('drag', request, signal)
   }
 
-  async move(request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void> {
+  async move(request: ComputerPoint, signal?: AbortSignal): Promise<void> {
     await this.client.call('move', request, signal)
   }
 

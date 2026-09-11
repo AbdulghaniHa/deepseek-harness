@@ -35,7 +35,7 @@ interface ComputerProvider {
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
   scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>
   drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>
-  move(request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void>
+  move(request: ComputerPoint, signal?: AbortSignal): Promise<void>
   clipboardRead(signal?: AbortSignal): Promise<string>
   clipboardWrite(text: string, signal?: AbortSignal): Promise<void>
 }
@@ -66,6 +66,14 @@ interface ComputerSnapshotNode {
   readonly actions: readonly ComputerA11yAction[]
   readonly secure: boolean
   readonly children?: readonly ComputerSnapshotNode[]
+}
+```
+
+```ts type-equiv
+/** One point in logical screen coordinates. */
+interface ComputerPoint {
+  readonly x: number
+  readonly y: number
 }
 ```
 
@@ -302,7 +310,7 @@ async drag(owner: Agent, windowId: ComputerWindowId, request: ComputerDragReques
  * @param request - destination coordinates.
  * @param signal - optional cancellation forwarded to the provider.
  */
-async move(owner: Agent, windowId: ComputerWindowId, request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void>
+async move(owner: Agent, windowId: ComputerWindowId, request: ComputerPoint, signal?: AbortSignal): Promise<void>
 
 /**
  * Read the clipboard. Observation-only; no grant is consumed.

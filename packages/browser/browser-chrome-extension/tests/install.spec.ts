@@ -30,20 +30,20 @@ afterEach(() => {
   root = undefined
 })
 
+/** Manifest file path from a resolved native-host location. */
+function manifestFile(location: ReturnType<typeof nativeHostManifestPath>): string {
+  if (location.kind !== 'file') throw new Error(`expected a file manifest, got a ${location.kind} location`)
+  return location.path
+}
+
 describe('native host paths and manifest', () => {
   it('resolves per-OS file and registry locations', () => {
-    expect(nativeHostManifestPath('chrome', 'darwin', '/Users/me')).toMatchObject({
-      path: expect.stringContaining('Google/Chrome/NativeMessagingHosts/com.deepseek.dsh.browser.json'),
-    })
-    expect(nativeHostManifestPath('chromium', 'linux', '/home/me')).toMatchObject({
-      path: expect.stringContaining('.config/chromium/NativeMessagingHosts'),
-    })
-    expect(nativeHostManifestPath('edge', 'linux', '/home/me')).toMatchObject({
-      path: expect.stringContaining('microsoft-edge'),
-    })
-    expect(nativeHostManifestPath('brave', 'darwin', '/Users/me')).toMatchObject({
-      path: expect.stringContaining('Brave-Browser'),
-    })
+    expect(manifestFile(nativeHostManifestPath('chrome', 'darwin', '/Users/me')))
+      .toContain('Google/Chrome/NativeMessagingHosts/com.deepseek.dsh.browser.json')
+    expect(manifestFile(nativeHostManifestPath('chromium', 'linux', '/home/me')))
+      .toContain('.config/chromium/NativeMessagingHosts')
+    expect(manifestFile(nativeHostManifestPath('edge', 'linux', '/home/me'))).toContain('microsoft-edge')
+    expect(manifestFile(nativeHostManifestPath('brave', 'darwin', '/Users/me'))).toContain('Brave-Browser')
     expect(nativeHostManifestPath('chrome', 'win32', 'C:\\Users\\me')).toEqual({
       kind: 'registry',
       key: windowsRegistryKey('chrome'),
@@ -89,7 +89,7 @@ describe('install and uninstall', () => {
       extensionId: DEFAULT_EXTENSION_ID,
     })
     const text = await readFile(installed!.location, 'utf8')
-    expect(JSON.parse(text).path).toBe('/opt/dsh-browser-host')
+    expect((JSON.parse(text) as { path?: string }).path).toBe('/opt/dsh-browser-host')
     const status = await nativeHostStatus({ browsers: ['chrome'], home: root, platform: 'darwin', packageRoot: root })
     expect(status.browsers[0]?.registered).toBe(true)
     await uninstallNativeHost({ browsers: ['chrome'], home: root, platform: 'darwin' })

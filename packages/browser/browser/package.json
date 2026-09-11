@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-browser",
   "description": "Abstract browser capability seam (ctx.browser) for the DeepSeek Harness \u2014 provider registry, owner-scoped tab attachments, CDP relay, and the BrowserError taxonomy",
-  "version": "0.1.3-alpha.1",
+  "version": "0.1.5-rc.2",
   "publishConfig": {
     "access": "public"
   },

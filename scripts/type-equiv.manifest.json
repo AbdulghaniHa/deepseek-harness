@@ -1463,6 +1463,11 @@
     },
     {
       "doc": "docs/subsystems/computer-use.md",
+      "symbol": "ComputerPoint",
+      "source": "packages/computer-use/computer-use/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/computer-use.md",
       "symbol": "ComputerScreenshotRequest",
       "source": "packages/computer-use/computer-use/src/types.ts"
     },

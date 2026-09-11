@@ -93,6 +93,18 @@ function unsupported(action: string, platform: NodeJS.Platform): never {
   throw new ComputerError(`${action} is not supported by the platform backend on ${platform}`, 'COMPUTER_UNSUPPORTED')
 }
 
+/**
+ * Reject a backend method the platform cannot serve. Whole-method stubs use
+ * this so a caller awaiting the declared promise sees a rejection rather than
+ * a synchronous throw.
+ */
+function unsupportedRejection(action: string, platform: NodeJS.Platform): Promise<never> {
+  return Promise.reject(new ComputerError(
+    `${action} is not supported by the platform backend on ${platform}`,
+    'COMPUTER_UNSUPPORTED',
+  ))
+}
+
 /** Options for {@link createPlatformBackend}. */
 export interface PlatformBackendOptions {
   readonly platform?: NodeJS.Platform
@@ -116,18 +128,18 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       return ['screenshot', 'clipboard']
     },
 
-    async permissions(): Promise<ComputerPermissions> {
+    permissions(): Promise<ComputerPermissions> {
       if (platform === 'darwin') {
-        return { accessibility: 'unknown', screenRecording: 'unknown', inputInjection: 'unknown' }
+        return Promise.resolve({ accessibility: 'unknown', screenRecording: 'unknown', inputInjection: 'unknown' })
       }
       if (platform === 'linux') {
-        return {
+        return Promise.resolve({
           accessibility: 'unknown',
           screenRecording: 'unknown',
           inputInjection: wayland ? 'denied' : 'unknown',
-        }
+        })
       }
-      return { accessibility: 'not-required', screenRecording: 'not-required', inputInjection: 'not-required' }
+      return Promise.resolve({ accessibility: 'not-required', screenRecording: 'not-required', inputInjection: 'not-required' })
     },
 
     async listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]> {
@@ -200,12 +212,12 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       await io.run(['osascript', '-e', `tell application ${JSON.stringify(name)} to activate`], signal)
     },
 
-    async windowAtPoint(): Promise<ComputerWindow | undefined> {
-      return undefined
+    windowAtPoint(): Promise<ComputerWindow | undefined> {
+      return Promise.resolve(undefined)
     },
 
-    async snapshot(): Promise<ComputerSnapshot> {
-      unsupported('snapshot', platform)
+    snapshot(): Promise<ComputerSnapshot> {
+      return unsupportedRejection('snapshot', platform)
     },
 
     async screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot> {
@@ -219,16 +231,16 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       return { png, width: 0, height: 0, scale: 1, bounds: request.region ?? { x: 0, y: 0, width: 0, height: 0 } }
     },
 
-    async press(): Promise<void> {
-      unsupported('press', platform)
+    press(): Promise<void> {
+      return unsupportedRejection('press', platform)
     },
 
-    async setValue(): Promise<void> {
-      unsupported('setValue', platform)
+    setValue(): Promise<void> {
+      return unsupportedRejection('setValue', platform)
     },
 
-    async action(): Promise<void> {
-      unsupported('action', platform)
+    action(): Promise<void> {
+      return unsupportedRejection('action', platform)
     },
 
     async click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void> {
@@ -243,20 +255,20 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
 
     async key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void> {
       if (platform !== 'darwin') unsupported('key', platform)
-      await io.run(['osascript', '-e', `tell application "System Events" to key code 36`], signal)
+      await io.run(['osascript', '-e', 'tell application "System Events" to key code 36'], signal)
       void request
     },
 
-    async scroll(): Promise<void> {
-      unsupported('scroll', platform)
+    scroll(): Promise<void> {
+      return unsupportedRejection('scroll', platform)
     },
 
-    async move(): Promise<void> {
-      unsupported('move', platform)
+    move(): Promise<void> {
+      return unsupportedRejection('move', platform)
     },
 
-    async drag(): Promise<void> {
-      unsupported('drag', platform)
+    drag(): Promise<void> {
+      return unsupportedRejection('drag', platform)
     },
 
     async clipboardRead(signal?: AbortSignal): Promise<string> {

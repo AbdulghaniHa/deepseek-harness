@@ -489,6 +489,7 @@ describe('status', () => {
     expect((await computer.status()).issues[0]).toMatchObject({ code: 'COMPUTER_HOST_CRASHED', message: 'io' })
     const second = await mount()
     second.computer.registerProvider(makeProvider('local', available, {
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- this case covers the non-Error status message.
       permissions: () => Promise.reject('bare'),
     }))
     expect((await second.computer.status()).issues[0]?.message).toBe('bare')

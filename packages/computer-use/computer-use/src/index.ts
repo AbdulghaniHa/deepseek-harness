@@ -24,6 +24,7 @@ import type {
   ComputerKeyRequest,
   ComputerLaunchRequest,
   ComputerPermissions,
+  ComputerPoint,
   ComputerProvider,
   ComputerScreenshot,
   ComputerScreenshotRequest,
@@ -60,6 +61,7 @@ export type {
   ComputerOperation,
   ComputerPermissions,
   ComputerPermissionState,
+  ComputerPoint,
   ComputerProvider,
   ComputerRect,
   ComputerScreenshot,
@@ -161,7 +163,7 @@ export class ComputerRuntime extends Service {
     super(ctx, 'computer')
     this.providerId = config.provider ?? process.env.DSH_COMPUTER_PROVIDER
     this.extraDenied = config.deniedApps ?? []
-    ctx.effect(() => () => this.providers.clear(), 'computer teardown')
+    ctx.effect(() => () =>{  this.providers.clear() }, 'computer teardown')
   }
 
   /**
@@ -507,7 +509,7 @@ export class ComputerRuntime extends Service {
    * @param request - destination coordinates.
    * @param signal - optional cancellation forwarded to the provider.
    */
-  async move(owner: Agent, windowId: ComputerWindowId, request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void> {
+  async move(owner: Agent, windowId: ComputerWindowId, request: ComputerPoint, signal?: AbortSignal): Promise<void> {
     await this.assertCoordinateTarget(owner, windowId, request.x, request.y, signal)
     await this.resolveProvider().move(request, signal)
   }

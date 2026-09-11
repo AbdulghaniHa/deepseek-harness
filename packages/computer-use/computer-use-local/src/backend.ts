@@ -13,6 +13,7 @@ import type {
   ComputerKeyRequest,
   ComputerLaunchRequest,
   ComputerPermissions,
+  ComputerPoint,
   ComputerScreenshot,
   ComputerScreenshotRequest,
   ComputerScrollRequest,
@@ -40,7 +41,7 @@ export interface DesktopBackend {
   type(text: string, signal?: AbortSignal): Promise<void>
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
   scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>
-  move(request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void>
+  move(request: ComputerPoint, signal?: AbortSignal): Promise<void>
   drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>
   clipboardRead(signal?: AbortSignal): Promise<string>
   clipboardWrite(text: string, signal?: AbortSignal): Promise<void>

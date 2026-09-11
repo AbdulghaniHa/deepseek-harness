@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Readable, Writable } from 'node:stream'
 import { ComputerError } from '@deepseek-ai/dsh-computer-use'
-import { decodeLines, encodeLine, isRpcResponse, rpcRequest, type ComputerRpcResponse } from './protocol.ts'
+import { decodeLines, encodeLine, isRpcResponse, rpcRequest } from './protocol.ts'
 
 /** Minimal process handle the client needs from `ctx.subprocess` or a test fake. */
 export interface ComputerHostProcess {
@@ -113,9 +113,10 @@ export class ComputerHostClient {
           signal?.removeEventListener('abort', onAbort)
           resolve(value)
         },
-        reject: (error) => {
+        reject: (error: unknown) => {
           clearTimeout(timer)
           signal?.removeEventListener('abort', onAbort)
+          /* oxlint-disable-next-line typescript/prefer-promise-reject-errors -- PendingCall's own callback, not a promise executor. */
           reject(error)
         },
       })
@@ -150,12 +151,12 @@ export class ComputerHostClient {
     }
   }
 
-  private async start(): Promise<ComputerHostProcess> {
+  private start(): Promise<ComputerHostProcess> {
     const process = this.spawn(this.argv)
     const stdout = process.stdout
     if (stdout === undefined) {
       process.terminate()
-      throw new ComputerError('computer-use helper has no stdout pipe', 'COMPUTER_HOST_CRASHED')
+      return Promise.reject(new ComputerError('computer-use helper has no stdout pipe', 'COMPUTER_HOST_CRASHED'))
     }
     stdout.setEncoding('utf8')
     stdout.on('data', (chunk: string) => {
@@ -170,7 +171,7 @@ export class ComputerHostClient {
       this.forgetProcess(process)
       this.rejectAll(new ComputerError('computer-use helper failed to spawn', 'COMPUTER_HOST_CRASHED'))
     })
-    return process
+    return Promise.resolve(process)
   }
 
   private onMessage(value: unknown): void {
@@ -178,7 +179,7 @@ export class ComputerHostClient {
     const pending = this.inflight.get(value.id)
     if (pending === undefined) return
     this.inflight.delete(value.id)
-    const response = value as ComputerRpcResponse
+    const response = value
     if ('error' in response) {
       pending.reject(new ComputerError(response.error.message, response.error.code))
       return

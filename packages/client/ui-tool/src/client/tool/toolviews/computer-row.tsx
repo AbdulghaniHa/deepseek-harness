@@ -28,7 +28,7 @@ const COMPUTER_TOOLS = [
 ] as const
 
 function computerSummary(block: ComputerRowProps['block'], untitled: string): string | undefined {
-  if (!('kind' in block) || block.kind !== 'tool-result' || block.meta === undefined || typeof block.meta !== 'object' || block.meta === null) {
+  if (!('kind' in block) || block.meta === undefined || typeof block.meta !== 'object' || block.meta === null) {
     return undefined
   }
   const meta = block.meta as { app?: unknown; windowTitle?: unknown }

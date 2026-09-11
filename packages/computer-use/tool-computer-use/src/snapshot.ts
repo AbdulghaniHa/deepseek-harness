@@ -64,20 +64,19 @@ export function buildComputerSnapshot(snapshot: ComputerSnapshot, options: {
     throw new ComputerError(`unknown snapshot handle "${options.rootHandle}"`, 'COMPUTER_STALE_REF')
   }
   const walk = (node: ComputerSnapshotNode, depth: number): void => {
-    if (collected.length >= options.maxNodes) {
-      truncated = true
-      return
-    }
     const name = node.name
     const role = node.role
     const matches = query === undefined
       || role.toLowerCase().includes(query)
       || name.toLowerCase().includes(query)
-    const actions = node.actions ?? [
-      ...node.supportsPress ? ['activate' as const] : [],
-      ...node.supportsSetValue ? ['setValue' as const] : [],
-    ]
+    const actions = node.actions
     if (matches) {
+      // Only a node the outline would have carried makes the result truncated;
+      // a node the query filters out costs the caller nothing.
+      if (collected.length >= options.maxNodes) {
+        truncated = true
+        return
+      }
       collected.push({
         ref: `${options.epoch}-e${collected.length}`,
         handle: node.handle,
@@ -99,7 +98,6 @@ export function buildComputerSnapshot(snapshot: ComputerSnapshot, options: {
     for (const child of node.children ?? []) walk(child, depth + 1)
   }
   for (const node of start) walk(node, 0)
-  truncated = truncated || collected.length >= options.maxNodes
   const lines = collected.map((node) => {
     const state = node.states.length > 0 ? ` (${node.states.join(', ')})` : ''
     const acts = node.actions.length > 0 ? ` actions=${node.actions.join(',')}` : ''

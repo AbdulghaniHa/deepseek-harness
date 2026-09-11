@@ -45,8 +45,8 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_evaluate`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
-| `@deepseek-ai/dsh-tool-computer-use` | `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_type`, `computer_wait_for` | `ctx.tools`、`ctx.computer`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result`、`computer/app-grant` | - | computer_* 工具把原生 helper 放在 ctx.computer 之后，使模型可见名称在 helper 宕机时保持稳定。`dsh-base` 发布时为 `enabled: false`。 |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
+| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`、`ctx.computer`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result`、`computer/app-grant` | - | computer_* 工具把原生 helper 放在 ctx.computer 之后，使模型可见名称在 helper 宕机时保持稳定。`dsh-base` 发布时为 `enabled: false`。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2433,9 +2433,51 @@ List recent Chrome downloads.
 
 来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
+### `browser_drag`
+
+Drag from a snapshot ref or viewport point to another in the same frame using trusted pointer input.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "fromRef": {
+      "type": "string",
+      "description": "Snapshot ref for the press point."
+    },
+    "fromX": {
+      "type": "number",
+      "description": "Viewport x for the press point when not using fromRef."
+    },
+    "fromY": {
+      "type": "number"
+    },
+    "toRef": {
+      "type": "string",
+      "description": "Snapshot ref for the release point."
+    },
+    "toX": {
+      "type": "number",
+      "description": "Viewport x for the release point when not using toRef."
+    },
+    "toY": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
 ### `browser_evaluate`
 
-Run a JavaScript expression in the attached tab and return a JSON value. Requires approval.
+Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.
 
 ```json
 {
@@ -2446,6 +2488,10 @@ Run a JavaScript expression in the attached tab and return a JSON value. Require
     },
     "expression": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
@@ -2456,6 +2502,26 @@ Run a JavaScript expression in the attached tab and return a JSON value. Require
 ```
 
 来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_frames`
+
+List document frames in an attached tab. Use a returned frameId with snapshot, text, evaluate, and wait tools; default is the main frame.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tabId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
 ### `browser_handle_dialog`
 
@@ -2771,7 +2837,7 @@ Choose a select option by visible text on an attached tab.
 
 ### `browser_snapshot`
 
-Capture a ref-annotated accessibility outline of the attached tab.
+Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.
 
 ```json
 {
@@ -2779,6 +2845,10 @@ Capture a ref-annotated accessibility outline of the attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
@@ -2788,6 +2858,19 @@ Capture a ref-annotated accessibility outline of the attached tab.
 ```
 
 来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_status`
+
+Report the selected browser provider, whether a live probe reached Chrome, supported operations, and recovery steps. Does not require a tab grant.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
 ### `browser_tabs`
 
@@ -2804,7 +2887,7 @@ List open Chrome tabs across all windows.
 
 ### `browser_text`
 
-Read visible text from an attached tab.
+Read visible text from an attached tab or a selected frame.
 
 ```json
 {
@@ -2812,6 +2895,10 @@ Read visible text from an attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
@@ -2891,7 +2978,7 @@ Set files on a file input identified by a snapshot ref.
 
 ### `browser_wait_for`
 
-Wait until text appears or a JS expression is truthy on an attached tab.
+Wait until text appears or a JS expression is truthy on an attached tab or selected frame.
 
 ```json
 {
@@ -2908,6 +2995,10 @@ Wait until text appears or a JS expression is truthy on an attached tab.
     },
     "timeoutMs": {
       "type": "integer"
+    },
+    "frameId": {
+      "type": "string",
+      "description": "Frame id from browser_frames; defaults to the main frame."
     }
   },
   "required": [
@@ -2922,7 +3013,67 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 
 <a id="deepseek-aidsh-tool-computer-use"></a>
 
+### `browser_wait_for_download`
+
+Wait until a Chrome download identified by browser_downloads completes. Returns the local path without reading or opening the file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "downloadId": {
+      "type": "string",
+      "description": "Download id from browser_downloads."
+    },
+    "timeoutMs": {
+      "type": "number",
+      "description": "How long to poll. Defaults to the tool timeout."
+    }
+  },
+  "required": [
+    "downloadId"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
 ## `@deepseek-ai/dsh-tool-computer-use`
+
+### `computer_action`
+
+对已捕获节点调用其声明支持的无障碍操作：activate、toggle、select、expandCollapse 或 setValue。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Epoch-scoped snapshot ref."
+    },
+    "action": {
+      "type": "string",
+      "description": "activate, toggle, select, expandCollapse, or setValue."
+    },
+    "value": {
+      "type": "string",
+      "description": "Replacement value when action is setValue."
+    }
+  },
+  "required": [
+    "windowId",
+    "ref",
+    "action"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 ### `computer_apps`
 
@@ -2939,7 +3090,7 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 
 ### `computer_click`
 
-点击窗口中的快照 ref 或坐标。当节点支持时，ref 优先使用无障碍 press。
+点击窗口中的快照 ref 或坐标。当节点支持时，ref 优先使用无障碍 press。截图空间坐标绑定到 observationId。
 
 ```json
 {
@@ -2965,6 +3116,10 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
       "type": "string",
       "description": "screenshot (default) or screen."
     },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
     "button": {
       "type": "string",
       "description": "left, right, or middle."
@@ -2972,6 +3127,13 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
     "count": {
       "type": "number",
       "description": "Click count. Defaults to 1."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3009,7 +3171,7 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 
 ### `computer_drag`
 
-在窗口中从一点拖到另一点。
+在窗口中从一个快照 ref 或一点拖到另一点。
 
 ```json
 {
@@ -3028,12 +3190,11 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
         },
         "y": {
           "type": "number"
+        },
+        "ref": {
+          "type": "string"
         }
-      },
-      "required": [
-        "x",
-        "y"
-      ]
+      }
     },
     "to": {
       "type": "object",
@@ -3044,16 +3205,26 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
         },
         "y": {
           "type": "number"
+        },
+        "ref": {
+          "type": "string"
         }
-      },
-      "required": [
-        "x",
-        "y"
-      ]
+      }
     },
     "space": {
       "type": "string",
       "description": "screenshot (default) or screen."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3131,6 +3302,10 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
     "space": {
       "type": "string",
       "description": "screenshot (default) or screen."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
     }
   },
   "required": [
@@ -3142,6 +3317,43 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 ```
 
 来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_observe`
+
+捕获有界无障碍快照，并可附带显式像素尺寸、逻辑边界和缩放比例的截图。纯文本模型路由只接收快照，不接收图片。后续截图空间坐标请绑定到返回的 observationId。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "query": {
+      "type": "string",
+      "description": "Optional role or name substring filter."
+    },
+    "maxDepth": {
+      "type": "number",
+      "description": "Include nodes through this depth (root is 0)."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional current snapshot ref whose node becomes the subtree root."
+    },
+    "screenshot": {
+      "type": "boolean",
+      "description": "Include a screenshot when the route accepts images. Defaults to true on image-capable routes."
+    }
+  },
+  "required": [
+    "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 ### `computer_press_key`
 
@@ -3251,6 +3463,10 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
       "type": "string",
       "description": "screenshot (default) or screen."
     },
+    "observationId": {
+      "type": "string",
+      "description": "Observation that produced screenshot-space coordinates."
+    },
     "direction": {
       "type": "string",
       "description": "up, down, left, or right."
@@ -3258,6 +3474,13 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
     "amount": {
       "type": "number",
       "description": "Scroll amount in provider units."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -3272,7 +3495,7 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 
 ### `computer_snapshot`
 
-把窗口的无障碍树读成带 epoch 作用域的大纲。纯文本模型路由上的主观察。
+把窗口的无障碍树读成带 epoch 作用域的大纲。纯文本模型路由上的主观察。maxDepth 与当前快照 ref 可选择子树；输出包含节点状态和支持的操作。
 
 ```json
 {
@@ -3288,7 +3511,11 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
     },
     "maxDepth": {
       "type": "number",
-      "description": "Unused depth hint reserved for providers; the node cap is snapshotMaxNodes."
+      "description": "Include nodes through this depth (root is 0). Output caps do not bound native full-tree traversal."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional current snapshot ref whose node becomes the subtree root."
     }
   },
   "required": [
@@ -3298,6 +3525,19 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 ```
 
 来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_status`
+
+报告所选 computer-use 提供方、实时探测是否成功、支持的操作、权限失败和恢复步骤。无需授权。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 ### `computer_type`
 
@@ -3335,7 +3575,7 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
 
 ### `computer_wait_for`
 
-轮询窗口无障碍树，直到文本或标题匹配，或超时。
+轮询窗口无障碍树，直到文本出现或消失、标题匹配，或某个已捕获节点达到指定状态。
 
 ```json
 {
@@ -3347,11 +3587,23 @@ browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模�
     },
     "text": {
       "type": "string",
-      "description": "Substring to find in the snapshot outline."
+      "description": "Substring to find in the snapshot outline, or to wait until gone when gone is true."
+    },
+    "gone": {
+      "type": "boolean",
+      "description": "When true, succeed once text is absent from the outline."
     },
     "title": {
       "type": "string",
       "description": "Substring to find in the window title."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref whose states are polled."
+    },
+    "state": {
+      "type": "string",
+      "description": "enabled, disabled, selected, expanded, or collapsed."
     },
     "timeoutMs": {
       "type": "number",

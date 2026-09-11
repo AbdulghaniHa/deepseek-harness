@@ -54,6 +54,22 @@ interface TabState {
 }
 
 /**
+ * Result of a tool that reports page identity and completion, with an optional
+ * capture and an optional observation error after a completed interaction.
+ */
+interface BrowserPageValue {
+  tabId: string
+  url: string
+  title: string
+  text: string
+  truncated: boolean
+  screenshot?: string
+  previewError?: string
+  frameId?: string
+  observationError?: string
+}
+
+/**
  * Register Phase 1 and Phase 2 browser tools.
  * @param ctx - host context with tools + browser.
  * @param options - resolved config.
@@ -163,14 +179,69 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     const tree = await cdp.send('Page.getFrameTree') as { frameTree?: FrameTreeNode }
     const state = tabState(tabId)
     const frames = tree.frameTree === undefined ? [] : flattenFrameTree(tree.frameTree)
+    const byFrameId = await associateTargets(owner, tabId, frames, state.targets, signal)
     state.frames = frames.map((frame) => {
-      const target = state.targets.find(item => item.type === 'iframe' && item.url === frame.url)
+      const target = byFrameId.get(frame.frameId)
       return {
         ...frame,
         ...target !== undefined ? { sessionId: target.sessionId, targetId: target.targetId } : {},
       }
     })
     return state.frames
+  }
+
+  /**
+   * Bind each frame to the flattened target that owns it. A URL that only one
+   * attached iframe reports is unambiguous; a URL several report is resolved
+   * by asking each candidate which frame its own tree roots at, so a duplicate
+   * iframe src never silently routes input to a sibling frame.
+   */
+  const associateTargets = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    frames: readonly BrowserFrame[],
+    targets: readonly AttachedTarget[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, AttachedTarget>> => {
+    const iframes = targets.filter(item => item.type === 'iframe')
+    const bound = new Map<string, AttachedTarget>()
+    for (const frame of frames) {
+      const candidates = iframes.filter(item => item.url === frame.url)
+      const [only] = candidates
+      if (only === undefined) continue
+      if (candidates.length === 1) {
+        bound.set(frame.frameId, only)
+        continue
+      }
+      for (const candidate of candidates) {
+        if (await childRootFrame(owner, tabId, candidate, signal) === frame.frameId) {
+          bound.set(frame.frameId, candidate)
+          break
+        }
+      }
+    }
+    return bound
+  }
+
+  /** Root frame id of one attached child target's own frame tree, when it reports one. */
+  const childRootFrame = async (
+    owner: Agent,
+    tabId: ReturnType<typeof BrowserTabId>,
+    target: AttachedTarget,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> => {
+    try {
+      const cdp = cdpClient(ctx.browser, owner, tabId, signal, {
+        sessionId: target.sessionId,
+        targetId: target.targetId,
+      })
+      const tree = await cdp.send('Page.getFrameTree') as { frameTree?: FrameTreeNode }
+      return tree.frameTree?.frame.id
+    } catch {
+      // A session that cannot report its own tree stays unbound; guessing from
+      // the URL would route input to whichever same-URL sibling attached first.
+      return undefined
+    }
   }
 
   const requireFrame = async (
@@ -238,11 +309,11 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     tabId: string,
     signal?: AbortSignal,
     frameId?: string,
-  ): Promise<Record<string, unknown>> => {
+  ): Promise<BrowserPageValue> => {
     bumpEpoch(tabId)
     try {
       const snapshot = await snapshotTab(owner, BrowserTabId(tabId), signal, frameId)
-      return snapshotValue(owner, tabId, snapshot, signal, frameId)
+      return await snapshotValue(owner, tabId, snapshot, signal, frameId)
     } catch (error) {
       return {
         tabId,
@@ -296,7 +367,7 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
     snapshot: BrowserSnapshot,
     signal?: AbortSignal,
     frameId?: string,
-  ) => {
+  ): Promise<BrowserPageValue> => {
     // Snapshot results carry their own page identity; only the capture is added.
     const preview = await previewValue(owner, BrowserTabId(tabId), signal)
     return {
@@ -905,8 +976,11 @@ export function registerBrowserTools(ctx: Context, options: ToolBrowserOptions):
       })
       let from = args.fromX !== undefined && args.fromY !== undefined ? { x: args.fromX, y: args.fromY } : undefined
       let to = args.toX !== undefined && args.toY !== undefined ? { x: args.toX, y: args.toY } : undefined
-      let fromFrame: string | undefined
-      let toFrame: string | undefined
+      // Raw viewport coordinates are main-frame coordinates, so an endpoint
+      // without a ref starts in the main frame; a ref replaces it with its own.
+      const mainFrame = await requireFrame(owner, tabId, undefined, exec.signal)
+      let fromFrame: string | undefined = mainFrame?.frameId
+      let toFrame: string | undefined = mainFrame?.frameId
       let cdp = cdpClient(ctx.browser, owner, tabId, exec.signal)
       if (args.fromRef !== undefined) {
         const node = resolveNode(args.tabId, args.fromRef)

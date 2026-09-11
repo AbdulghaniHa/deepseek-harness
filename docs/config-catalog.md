@@ -360,7 +360,7 @@ export interface BrowserRuntimeConfig {
 }
 ```
 
-Source: [`packages/browser/browser/src/index.ts:74`](../packages/browser/browser/src/index.ts)
+Source: [`packages/browser/browser/src/index.ts:103`](../packages/browser/browser/src/index.ts)
 
 <a id="deepseek-aidsh-browser-chrome-extension"></a>
 
@@ -570,7 +570,7 @@ export interface ComputerRuntimeConfig {
 }
 ```
 
-Source: [`packages/computer-use/computer-use/src/index.ts:85`](../packages/computer-use/computer-use/src/index.ts)
+Source: [`packages/computer-use/computer-use/src/index.ts:109`](../packages/computer-use/computer-use/src/index.ts)
 
 <a id="deepseek-aidsh-computer-use-local"></a>
 
@@ -2870,7 +2870,7 @@ export interface Config {
 export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
 ```
 
-Source: [`packages/browser/tool-browser/src/index.ts:62`](../packages/browser/tool-browser/src/index.ts)
+Source: [`packages/browser/tool-browser/src/index.ts:64`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-computer-use"></a>
 

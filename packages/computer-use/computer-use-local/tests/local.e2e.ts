@@ -41,8 +41,7 @@ describe.skipIf(skip)('computer-use-local e2e', () => {
       expect(shot.png.byteLength).toBeGreaterThan(0)
       return
     }
-    await expect(backend.screenshot({})).rejects.toMatchObject({
-      code: expect.stringMatching(/^COMPUTER_(UNSUPPORTED|PERMISSION_DENIED)$/),
-    })
+    const failure = await backend.screenshot({}).catch((error: unknown) => error)
+    expect((failure as { code?: string }).code).toMatch(/^COMPUTER_(UNSUPPORTED|PERMISSION_DENIED)$/)
   }, 30_000)
 })

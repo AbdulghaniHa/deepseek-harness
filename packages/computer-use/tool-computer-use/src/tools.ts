@@ -19,7 +19,6 @@ import { approveComputerAction, ensureAppGrant, type ComputerApprovalMode, type 
 import { computerMetaFromValue, formatComputerSnapshot, presentComputerCall, presentComputerResult } from './present.ts'
 import { assertImageCapableRoute } from './route.ts'
 import { buildComputerSnapshot, resolveRef, type ComputerToolSnapshot } from './snapshot.ts'
-import type { UserQuestionService } from '@deepseek-ai/dsh-user-questions'
 
 /** Resolved tool-computer-use config used while registering tools. */
 export interface ToolComputerUseOptions {
@@ -46,6 +45,26 @@ interface Observation {
   }
 }
 
+/** Tool result for a window whose observation succeeded. */
+interface SnapshotValue {
+  windowId: string
+  app: string
+  windowTitle: string
+  truncated: boolean
+  text: string
+  observationId: string
+}
+
+/** Tool result after input completed but the follow-up observation failed. */
+interface SnapshotFailure {
+  windowId: string
+  app: string
+  windowTitle: string
+  truncated: boolean
+  text: string
+  observationError: string
+}
+
 interface WindowState {
   epoch: number
   snapshot: ComputerToolSnapshot | undefined
@@ -65,7 +84,7 @@ interface WindowState {
 export function registerComputerTools(ctx: Context, options: ToolComputerUseOptions): void {
   const states = new Map<string, WindowState>()
   const approval = ctx.get('approval') as ComputerApprover | undefined
-  const userQuestions = ctx.get('userQuestions') as UserQuestionService | undefined
+  const userQuestions = ctx.get('userQuestions')
 
   const requireOwner = (agent: Agent | undefined): Agent => {
     if (agent === undefined) throw new Error('computer tools require an agent')
@@ -210,17 +229,28 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     }
   }
 
-  const snapshotValue = (window: ComputerWindow, app: ComputerApp, snapshot: ComputerToolSnapshot, observation: Observation, extra: Record<string, unknown> = {}) => ({
+  const snapshotValue = <E extends Record<string, unknown>>(
+    window: ComputerWindow,
+    app: ComputerApp,
+    snapshot: ComputerToolSnapshot,
+    observation: Observation,
+    extra?: E,
+  ): SnapshotValue & E => ({
     windowId: window.id,
     app: app.name,
     windowTitle: window.title,
     truncated: snapshot.truncated,
     text: snapshot.text,
     observationId: observation.id,
-    ...extra,
+    ...extra ?? {} as E,
   })
 
-  const afterAction = async (owner: Agent, window: ComputerWindow, extra: Record<string, unknown> = {}, signal?: AbortSignal) => {
+  const afterAction = async <E extends Record<string, unknown>>(
+    owner: Agent,
+    window: ComputerWindow,
+    extra: E,
+    signal?: AbortSignal,
+  ): Promise<(SnapshotValue & E) | (SnapshotFailure & E)> => {
     bumpEpoch(window.id)
     const app = await findApp(window.appId, signal)
     try {
@@ -599,8 +629,6 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       const scale = shot.width > options.screenshotMaxWidth && shot.width > 0
         ? options.screenshotMaxWidth / shot.width
         : 1
-      const width = Math.max(1, Math.round(shot.width * scale) || shot.width)
-      const height = Math.max(1, Math.round(shot.height * scale) || shot.height)
       const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-screenshot.png' })
       if (args.windowId === undefined) {
         return {
@@ -614,8 +642,10 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       }
       const window = await findWindow(args.windowId, exec.signal)
       const state = windowState(args.windowId)
-      const captured = { bounds: shot.bounds, width, height, scale: shot.scale * scale }
-      state.screenshot = { bounds: shot.bounds, width, height }
+      // Screenshot-space coordinates are mapped through the stored image's own
+      // pixel dimensions, which are also the dimensions reported to the model.
+      const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale: shot.scale * scale }
+      state.screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
       if (state.observation === undefined) {
         state.observation = {
           id: `${args.windowId}:${state.epoch}:shot`,
@@ -693,24 +723,29 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
           bytes: { type: 'number' },
         },
       },
-      render: (_args, value) => [
-        {
-          type: 'text',
-          text: formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
-        },
-        ...value.attachmentId !== undefined && value.mediaType !== undefined && value.bytes !== undefined && value.width !== undefined && value.height !== undefined
-          ? [{
-            type: 'image' as const,
-            attachment: {
-              attachmentId: AttachmentId(value.attachmentId),
-              mediaType: value.mediaType as 'image/png',
-              bytes: value.bytes,
-              width: value.width,
-              height: value.height,
-            },
-          }]
-          : [],
-      ],
+      render: (_args, value) => {
+        const { attachmentId, mediaType, bytes, width, height } = value
+        const captured = attachmentId !== undefined && mediaType !== undefined
+          && bytes !== undefined && width !== undefined && height !== undefined
+        return [
+          {
+            type: 'text',
+            text: formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+          },
+          ...captured
+            ? [{
+              type: 'image' as const,
+              attachment: {
+                attachmentId: AttachmentId(attachmentId),
+                mediaType: mediaType as 'image/png',
+                bytes,
+                width,
+                height,
+              },
+            }]
+            : [],
+        ]
+      },
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
@@ -741,11 +776,11 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
               const scale = shot.width > options.screenshotMaxWidth
                 ? options.screenshotMaxWidth / shot.width
                 : 1
-              const width = Math.max(1, Math.round(shot.width * scale))
-              const height = Math.max(1, Math.round(shot.height * scale))
               const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-observe.png' })
-              const captured = { bounds: shot.bounds, width, height, scale: shot.scale * scale }
-              windowState(args.windowId).screenshot = { bounds: shot.bounds, width, height }
+              // Same coordinate space as computer_screenshot: the stored image's
+              // own pixel dimensions, which are what the result declares.
+              const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale: shot.scale * scale }
+              windowState(args.windowId).screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
               observation.screenshot = captured
               image = {
                 width: saved.width,
@@ -1265,7 +1300,8 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         ? args.state
         : undefined
       while (Date.now() <= deadline) {
-        const { window, snapshot, observation } = await takeSnapshot(owner, args.windowId, args.gone === true ? undefined : args.text, exec.signal)
+        const query = args.gone === true ? undefined : args.text
+        const { window, snapshot, observation } = await takeSnapshot(owner, args.windowId, query, exec.signal)
         lastTitle = window.title
         lastText = snapshot.text
         lastObservationId = observation.id

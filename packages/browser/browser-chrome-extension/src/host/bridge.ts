@@ -78,7 +78,7 @@ export class NativeHost {
       }
     }
     const listen = this.options.listen ?? defaultListen
-    this.server = listen(this.options.socketPath, socket => this.accept(socket))
+    this.server = listen(this.options.socketPath, (socket) => { this.accept(socket) })
     if (!this.options.socketPath.startsWith('\\\\.\\pipe\\')) {
       try {
         chmod(this.options.socketPath, 0o600)
@@ -86,8 +86,8 @@ export class NativeHost {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
     }
-    this.options.stdin.on('data', chunk => this.onStdin(chunk))
-    this.options.stdin.on('end', () => this.stop())
+    this.options.stdin.on('data', (chunk: Buffer) => { this.onStdin(chunk) })
+    this.options.stdin.on('end', () => { this.stop() })
   }
 
   /** Close the socket server and every client. */
@@ -118,9 +118,9 @@ export class NativeHost {
     const id = `client-${++this.nextClient}`
     const session: ClientSession = { id, socket, buffer: Buffer.alloc(0), assembler: new ChunkAssembler() }
     this.clients.set(id, session)
-    socket.on('data', chunk => this.onClientData(session, chunk))
-    socket.on('close', () => this.dropClient(id))
-    socket.on('error', () => this.dropClient(id))
+    socket.on('data', (chunk) =>{  this.onClientData(session, chunk) })
+    socket.on('close', () =>{  this.dropClient(id) })
+    socket.on('error', () =>{  this.dropClient(id) })
   }
 
   private dropClient(id: string): void {

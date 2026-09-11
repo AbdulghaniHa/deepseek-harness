@@ -39,13 +39,14 @@ export function flattenFrameTree(root: FrameTreeNode): BrowserFrame[] {
 }
 
 /**
- * Drag endpoints must share a frame when both are snapshot refs.
- * @param fromFrame - frame id of the press ref, if any.
- * @param toFrame - frame id of the release ref, if any.
- * @returns nothing; throws when both ids are present and differ.
+ * Drag endpoints must resolve to the same document frame. The caller passes
+ * each endpoint's frame, using the main frame for raw viewport coordinates.
+ * @param fromFrame - frame id of the press point.
+ * @param toFrame - frame id of the release point.
+ * @returns nothing; throws when the two frame ids differ.
  */
 export function assertSameFrame(fromFrame?: string, toFrame?: string): void {
-  if (fromFrame !== undefined && toFrame !== undefined && fromFrame !== toFrame) {
+  if (fromFrame !== toFrame) {
     throw new BrowserError('browser_drag requires both endpoints in the same frame', 'BROWSER_UNSUPPORTED_DRAG')
   }
 }

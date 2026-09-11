@@ -110,7 +110,15 @@ describe('Chrome debugger sessions and downloads', () => {
       error: undefined,
       filePath: '/tmp/a.zip',
     }])
-    chrome.downloads.search.mockResolvedValueOnce([{ id: 9, url: 'https://d', filename: '/tmp/a.zip', state: 'complete' }])
+    chrome.downloads.search.mockResolvedValueOnce([{
+      id: 9,
+      url: 'https://d',
+      filename: '/tmp/a.zip',
+      state: 'complete',
+      bytesReceived: 1,
+      totalBytes: 1,
+      exists: true,
+    }])
     await expect(dispatch('downloads.get', { id: '9' })).resolves.toMatchObject({ id: '9', filePath: '/tmp/a.zip' })
     chrome.downloads.search.mockResolvedValueOnce([])
     await expect(dispatch('downloads.get', { id: '8' })).resolves.toBeNull()

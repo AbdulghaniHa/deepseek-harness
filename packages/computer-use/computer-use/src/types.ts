@@ -90,6 +90,12 @@ export interface ComputerPermissions {
   readonly inputInjection: ComputerPermissionState
 }
 
+/** One point in logical screen coordinates. */
+export interface ComputerPoint {
+  readonly x: number
+  readonly y: number
+}
+
 /** Axis-aligned rectangle in logical screen coordinates. */
 export interface ComputerRect {
   readonly x: number
@@ -252,7 +258,7 @@ export interface ComputerProvider {
   key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
   scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>
   drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>
-  move(request: { readonly x: number; readonly y: number }, signal?: AbortSignal): Promise<void>
+  move(request: ComputerPoint, signal?: AbortSignal): Promise<void>
   clipboardRead(signal?: AbortSignal): Promise<string>
   clipboardWrite(text: string, signal?: AbortSignal): Promise<void>
 }

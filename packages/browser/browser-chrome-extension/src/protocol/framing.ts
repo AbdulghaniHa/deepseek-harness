@@ -68,7 +68,7 @@ export function chunkNativePayload(payload: unknown): unknown[] {
 
 /** Accumulator that reassembles {@link chunkNativePayload} envelopes. */
 export class ChunkAssembler {
-  private readonly parts = new Map<string, { total: number; data: string[] }>()
+  private readonly parts = new Map<string, { total: number; data: (string | undefined)[] }>()
 
   /**
    * Feed one decoded message. Complete values are returned; incomplete
@@ -76,9 +76,9 @@ export class ChunkAssembler {
    * @param message - a raw decoded JSON value.
    * @returns the reassembled payload, the original message, or `undefined`.
    */
-  push(message: unknown): unknown | undefined {
+  push(message: unknown): unknown {
     if (!isChunkEnvelope(message)) return message
-    const bucket = this.parts.get(message.id) ?? { total: message.total, data: [] }
+    const bucket = this.parts.get(message.id) ?? { total: message.total, data: [] as (string | undefined)[] }
     bucket.data[message.index] = message.data
     this.parts.set(message.id, bucket)
     if (bucket.data.filter(item => item !== undefined).length < message.total) return undefined

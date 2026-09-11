@@ -23,6 +23,7 @@ import {
   type ComputerLaunchRequest,
   type ComputerPermissionState,
   type ComputerPermissions,
+  type ComputerPoint,
   type ComputerRect,
   type ComputerScreenshot,
   type ComputerScreenshotRequest,
@@ -588,7 +589,7 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
           appId: appIdOf(window.pid),
           title: window.title,
           nodes: mapped === undefined ? [] : [mapped],
-          truncated: walk.truncated || walk.left <= 0,
+          truncated: walk.truncated,
         }
       })
     },
@@ -670,7 +671,7 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       })
     },
 
-    move(request: { readonly x: number; readonly y: number }): Promise<void> {
+    move(request: ComputerPoint): Promise<void> {
       return settle(() => {
         machine.moveMouse(request.x, request.y, module.Coordinate.Abs)
       })

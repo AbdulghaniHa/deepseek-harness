@@ -209,7 +209,8 @@ describe('ChromeExtensionProvider methods', () => {
             { id: 2, url: 'https://e', filename: 'g', state: 'downloading' },
           ])))
         } else if (request.method === 'downloads.get') {
-          const id = String((request.params as { id?: unknown })?.id ?? '')
+          const rawId = (request.params as { id?: unknown } | undefined)?.id
+          const id = typeof rawId === 'string' ? rawId : ''
           if (id === '1') {
             socket.write(encodeFrame(rpcSuccess(request.id, { id: 1, url: 'https://d', filename: 'f', state: 'complete' })))
           } else if (id === '2') {

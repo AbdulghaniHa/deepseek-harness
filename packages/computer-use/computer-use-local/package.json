@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-computer-use-local",
   "description": "Local desktop provider for the DeepSeek Harness computer-use capability seam (ctx.computer): crash-isolated helper over stdio JSON-RPC",
-  "version": "0.1.3-alpha.1",
+  "version": "0.1.5-rc.2",
   "publishConfig": {
     "access": "public"
   },

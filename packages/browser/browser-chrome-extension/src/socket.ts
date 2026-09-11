@@ -105,7 +105,7 @@ export class BrowserHostClient {
       const onAbort = () => {
         this.pending.delete(id)
         if (timer !== undefined) clearTimeout(timer)
-        const reason = signal?.reason
+        const reason: unknown = signal?.reason
         /* v8 ignore next -- AbortSignal.reason is an Error in the tests that abort with a value. */
         reject(reason instanceof Error ? reason : new Error('browser host request aborted'))
       }

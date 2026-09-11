@@ -362,7 +362,7 @@ export interface BrowserRuntimeConfig {
 }
 ```
 
-来源： [`packages/browser/browser/src/index.ts:72`](../packages/browser/browser/src/index.ts)
+来源： [`packages/browser/browser/src/index.ts:103`](../packages/browser/browser/src/index.ts)
 
 <a id="deepseek-aidsh-browser-chrome-extension"></a>
 
@@ -572,7 +572,7 @@ export interface ComputerRuntimeConfig {
 }
 ```
 
-来源：[`packages/computer-use/computer-use/src/index.ts:85`](../packages/computer-use/computer-use/src/index.ts)
+来源：[`packages/computer-use/computer-use/src/index.ts:109`](../packages/computer-use/computer-use/src/index.ts)
 
 <a id="deepseek-aidsh-computer-use-local"></a>
 
@@ -2872,7 +2872,7 @@ export interface Config {
 export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
 ```
 
-来源： [`packages/browser/tool-browser/src/index.ts:62`](../packages/browser/tool-browser/src/index.ts)
+来源： [`packages/browser/tool-browser/src/index.ts:64`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-computer-use"></a>
 

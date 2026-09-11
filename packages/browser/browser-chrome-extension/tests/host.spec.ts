@@ -153,7 +153,7 @@ describe('NativeHost multiplexer', () => {
       },
       listen: () => ({ close: () => {} }) as never,
     })
-    expect(() => failing.start()).toThrow('busy')
+    expect(() =>{  failing.start() }).toThrow('busy')
   })
 
   it('swallows ENOENT when chmod of the new socket races and rethrows other chmod errors', () => {
@@ -190,7 +190,7 @@ describe('NativeHost multiplexer', () => {
       unlink: () => {},
       listen: () => ({ close: () => {} }) as never,
     })
-    expect(() => failing.start()).toThrow('chmod-denied')
+    expect(() =>{  failing.start() }).toThrow('chmod-denied')
   })
 
   it('remaps extension failures, ignores leftover chunks, and drops clients on error', () => {
@@ -236,16 +236,16 @@ describe('NativeHost multiplexer', () => {
   it('listens on a real unix socket when no listen hook is supplied', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
-    const { createConnection } = await import('node:net')
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-browser-listen-'))
-    const path = join(dir, 'host.sock')
+    const nodePath = await import('node:path')
+    const net = await import('node:net')
+    const dir = await mkdtemp(nodePath.join(tmpdir(), 'dsh-browser-listen-'))
+    const path = nodePath.join(dir, 'host.sock')
     const stdin = new PassThrough()
     const stdout = new PassThrough()
     const host = new NativeHost({ socketPath: path, stdin, stdout })
     host.start()
     await new Promise<void>((resolve, reject) => {
-      const socket = createConnection(path)
+      const socket = net.createConnection(path)
       socket.once('connect', () => {
         socket.end()
         resolve()

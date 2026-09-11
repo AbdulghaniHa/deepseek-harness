@@ -6,14 +6,16 @@
 import type { GenericCallView, GenericResultView } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
-/** Persisted `tool/result` meta for replay cards. Bytes never belong here. */
+/**
+ * Persisted `tool/result` meta for replay cards. Captured pixels never belong
+ * here; a card that needs them re-runs the observation instead.
+ */
 export interface ComputerToolMeta {
   readonly app?: string
   readonly windowTitle?: string
   readonly windowId?: string
   readonly observationId?: string
   readonly observationError?: string
-  readonly operation?: string
 }
 
 /**
@@ -52,7 +54,6 @@ export function computerMetaFromValue(value: Record<string, unknown>): JsonValue
     ...typeof value.windowId === 'string' ? { windowId: value.windowId } : {},
     ...typeof value.observationId === 'string' ? { observationId: value.observationId } : {},
     ...typeof value.observationError === 'string' ? { observationError: value.observationError } : {},
-    ...typeof value.operation === 'string' ? { operation: value.operation } : {},
   }
   if (Object.keys(meta).length === 0) return {}
   return { ...meta }
