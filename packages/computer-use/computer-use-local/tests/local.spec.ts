@@ -224,6 +224,8 @@ function fakeNode(spec: FakeNodeSpec): SimulangNode {
 interface FakeWindowSpec {
   pid: number
   title: string
+  /** A minimized window: simulang's binding throws from `boundingBox`. */
+  minimized?: boolean
 }
 
 function fakeSimulang(options: {
@@ -242,7 +244,12 @@ function fakeSimulang(options: {
   const makeWindow = (spec: FakeWindowSpec): SimulangWindow => ({
     pid: spec.pid,
     title: spec.title,
-    boundingBox: () => ({ left: 5, top: 6, width: 300, height: 200 }),
+    boundingBox: () => {
+      if (spec.minimized === true) {
+        throw new Error('bounding box right (0) must be greater than left (0) (window is minimized; show it before capturing)')
+      }
+      return { left: 5, top: 6, width: 300, height: 200 }
+    },
     focus: () => { calls.push(`focus ${spec.pid}:${spec.title}`); return true },
     screenshot: () => shot(300, 200),
   })
@@ -348,6 +355,17 @@ describe('simulang adapter', () => {
     expect(fake.calls).toContain('focus 9:Editor')
     expect(await backend.windowAtPoint(-1, 0)).toBeUndefined()
     expect(await backend.windowAtPoint(3, 4)).toMatchObject({ id: '7:at 3,4', appId: 'pid:7', focused: false })
+  })
+
+  it('lists a minimized window with an empty box instead of failing the enumeration', async () => {
+    const fake = fakeSimulang({ windows: [{ pid: 7, title: 'Notes' }, { pid: 7, title: 'Minimized', minimized: true }] })
+    const backend = createSimulangBackend(fake.module, { processNames: async () => new Map() })
+    const windows = await backend.listWindows()
+    expect(windows.map(window => window.title)).toEqual(['Notes', 'Minimized'])
+    expect(windows[1]).toMatchObject({ bounds: { x: 0, y: 0, width: 0, height: 0 } })
+    // App discovery reads every window's box too, so one minimized window must
+    // not take the whole listing down with it.
+    expect(await backend.listApps()).toEqual([{ id: 'pid:7', name: 'pid:7', pid: 7 }])
   })
 
   it('reuses one window enumeration within windowCacheMs and refreshes on a miss', async () => {
@@ -510,10 +528,12 @@ describe('simulang adapter', () => {
     expect(await posix([7, 9])).toEqual(new Map([[7, '/Applications/Notes.app/Contents/MacOS/Notes']]))
     const windows = processNamesFor('win32', async (bin, args) => {
       expect(bin).toBe('tasklist')
-      expect(args).toEqual(['/fo', 'csv', '/nh', '/fi', 'PID eq 7', '/fi', 'PID eq 9'])
-      return '"notepad.exe","7","Console","1","10 K"\r\nINFO: No tasks are running.\r\n\r\n'
+      // One unfiltered enumeration: `tasklist` ANDs repeated `/fi` filters, so
+      // a per-pid filter list resolves nothing once two pids are requested.
+      expect(args).toEqual(['/fo', 'csv', '/nh'])
+      return '"notepad.exe","7","Console","1","10 K"\r\n"calc.exe","9","Console","1","10 K"\r\n\r\n'
     })
-    expect(await windows([7, 9])).toEqual(new Map([[7, 'notepad.exe']]))
+    expect(await windows([7, 9])).toEqual(new Map([[7, 'notepad.exe'], [9, 'calc.exe']]))
     const partial = execProcessList(async () => {
       throw Object.assign(new Error('ps exited 1'), { stdout: '7 /usr/bin/gedit\n' })
     })

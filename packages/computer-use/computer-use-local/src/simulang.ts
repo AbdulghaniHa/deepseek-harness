@@ -247,6 +247,21 @@ function rect(box: SimulangBox | null): ComputerRect {
   return { x: box.left, y: box.top, width: box.width, height: box.height }
 }
 
+/**
+ * Read a window's box for enumeration, treating a throwing read as "no
+ * on-screen box". A minimized window has no box and simulang's binding throws
+ * instead of reporting an empty one, so listing windows and apps must not fail
+ * wholesale because one window is minimized. Explicit screenshots still surface
+ * the binding's own message naming the minimized window.
+ */
+function windowBounds(window: SimulangWindow): ComputerRect {
+  try {
+    return rect(window.boundingBox())
+  } catch {
+    return rect(null)
+  }
+}
+
 function appIdOf(pid: number): ComputerAppId {
   return ComputerAppId(`pid:${pid}`)
 }
@@ -302,7 +317,9 @@ export function processNamesFor(platform: NodeJS.Platform, run: ProcessListRunne
     const names = new Map<number, string>()
     if (pids.length === 0) return names
     const stdout = platform === 'win32'
-      ? await run('tasklist', ['/fo', 'csv', '/nh', ...pids.flatMap(pid => ['/fi', `PID eq ${pid}`])])
+      // `tasklist` ANDs repeated `/fi` filters, so one filter per pid matches
+      // nothing as soon as two pids are requested. Enumerate once instead.
+      ? await run('tasklist', ['/fo', 'csv', '/nh'])
       : await run('ps', ['-p', pids.join(','), '-o', 'pid=,comm='])
     for (const line of stdout.split(/\r?\n/u)) {
       if (platform === 'win32') {
@@ -382,7 +399,7 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       id,
       appId: appIdOf(window.pid),
       title: window.title,
-      bounds: rect(window.boundingBox()),
+      bounds: windowBounds(window),
       focused: focused !== null && focused.pid === window.pid && focused.title === window.title && !String(id).includes('#'),
     }))
   }
@@ -399,7 +416,7 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
   const toWindow = (window: SimulangWindow, focused: boolean): ComputerWindow => {
     const id = ComputerWindowId(`${window.pid}:${window.title}`)
     windowsById.set(id, window)
-    return { id, appId: appIdOf(window.pid), title: window.title, bounds: rect(window.boundingBox()), focused }
+    return { id, appId: appIdOf(window.pid), title: window.title, bounds: windowBounds(window), focused }
   }
 
   const toScreenshot = (shot: SimulangScreenshot, bounds: ComputerRect): ComputerScreenshot => {

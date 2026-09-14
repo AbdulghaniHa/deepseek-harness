@@ -639,8 +639,8 @@ describe('computer tools', () => {
     expect(shot.content[0]).toMatchObject({ type: 'text' })
   })
 
-  it('saves a screenshot on a vision route and downscales logical size', async () => {
-    const { call } = await mount({ vision: true, config: { approval: 'never', screenshotMaxWidth: 50 } })
+  it('saves a screenshot on a vision route without resizing the capture', async () => {
+    const { call } = await mount({ vision: true, config: { approval: 'never' } })
     const shot = await call('computer_screenshot', { windowId: 'w1' })
     expect(shot.isError).toBe(false)
     await call('computer_click', { windowId: 'w1', x: 25, y: 25 })
@@ -652,7 +652,7 @@ describe('computer tools', () => {
     const clicks: { x: number; y: number }[] = []
     const { call } = await mount({
       vision: true,
-      config: { approval: 'never', screenshotMaxWidth: 50 },
+      config: { approval: 'never' },
       provider: makeProvider({
         click: (request) => {
           clicks.push({ x: request.x, y: request.y })
@@ -661,9 +661,10 @@ describe('computer tools', () => {
       }),
     })
     // The capture is 100x50 px over an 800x600 window, so the centre of the
-    // declared image is the centre of the window.
+    // declared image is the centre of the window, and the declared scale is the
+    // delivered image's own ratio to those logical units.
     const observed = await call('computer_observe', { windowId: 'w1' })
-    expect(observed.value).toMatchObject({ width: 100, height: 50 })
+    expect(observed.value).toMatchObject({ width: 100, height: 50, scale: 0.125 })
     expect((await call('computer_click', { windowId: 'w1', x: 50, y: 25 })).isError).toBe(false)
     expect(clicks.at(-1)).toEqual({ x: 400, y: 300 })
   })
@@ -792,14 +793,12 @@ describe('computer tools', () => {
     const invalid = (patch: Partial<ToolComputer.Config>): void => {
       ToolComputer.apply(ctx2, {
         snapshotMaxNodes: 1,
-        screenshotMaxWidth: 1,
         screenshotMaxBytes: 1,
         timeoutMs: 1,
         ...patch,
       })
     }
     expect(() => { invalid({ snapshotMaxNodes: 0 }) }).toThrow(/snapshotMaxNodes/)
-    expect(() => { invalid({ screenshotMaxWidth: 0 }) }).toThrow(/screenshotMaxWidth/)
     expect(() => { invalid({ screenshotMaxBytes: 0 }) }).toThrow(/screenshotMaxBytes/)
     expect(() => { invalid({ timeoutMs: 0 }) }).toThrow(/timeoutMs/)
   })
@@ -811,7 +810,7 @@ describe('computer tools', () => {
   })
 
   it('covers presenters, gone windows, unresolved routes, and screenshot mapping', async () => {
-    const { ctx, call } = await mount({ vision: true, config: { approval: 'never', screenshotMaxWidth: 50 } })
+    const { ctx, call } = await mount({ vision: true, config: { approval: 'never' } })
     const presenterArgs: Record<string, Record<string, unknown>> = {
       computer_status: {},
       computer_apps: {},
@@ -984,12 +983,12 @@ describe('computer tools', () => {
     expect((await noAttach.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
     const huge = await mount({
       vision: true,
-      config: { approval: 'never', screenshotMaxBytes: 1, screenshotMaxWidth: 10 },
+      config: { approval: 'never', screenshotMaxBytes: 1 },
     })
     expect((await huge.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
     const scaled = await mount({
       vision: true,
-      config: { approval: 'never', screenshotMaxWidth: 50 },
+      config: { approval: 'never' },
     })
     expect((await scaled.call('computer_observe', { windowId: 'w1' })).isError).toBe(false)
     expect((await scaled.call('computer_screenshot', {})).isError).toBe(false)

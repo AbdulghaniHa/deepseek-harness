@@ -42,7 +42,6 @@ Load the computer-use service, a provider, and this package; set `enabled: true`
 | `approval` | `apps` | `always`, `apps`, or `never` |
 | `grantScope` | `session` | Default duration offered on first use |
 | `snapshotMaxNodes` | `200` | Cap on accessibility nodes |
-| `screenshotMaxWidth` | `1280` | Logical max width for screenshot coordinates |
 | `screenshotMaxBytes` | `1000000` | Encoded screenshot byte cap |
 | `timeoutMs` | `30000` | Cooperative tool timeout |
 | `allowScreenCapture` | `true` | When false, `computer_screenshot` refuses |

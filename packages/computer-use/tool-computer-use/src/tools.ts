@@ -25,10 +25,23 @@ export interface ToolComputerUseOptions {
   readonly approval: ComputerApprovalMode
   readonly grantScope: 'once' | 'session'
   readonly snapshotMaxNodes: number
-  readonly screenshotMaxWidth: number
   readonly screenshotMaxBytes: number
   readonly timeoutMs: number
   readonly allowScreenCapture: boolean
+}
+
+/**
+ * Ratio of a screenshot's delivered pixels to the logical units it covers.
+ * The attachment store owns image sizing, so the stored width can differ from
+ * the capture width. Screenshot-space coordinates map through the delivered
+ * width, so this reports that same delivered image rather than an intended
+ * resize the tool never performs.
+ * @param bounds - logical bounds of the captured window.
+ * @param deliveredWidth - intrinsic pixel width of the stored image.
+ * @returns delivered image pixels per logical unit.
+ */
+function deliveredScale(bounds: ComputerRect, deliveredWidth: number): number {
+  return bounds.width > 0 ? deliveredWidth / bounds.width : 1
 }
 
 interface Observation {
@@ -626,15 +639,13 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       if (shot.png.byteLength > options.screenshotMaxBytes) {
         throw new Error(`computer_screenshot exceeded screenshotMaxBytes (${options.screenshotMaxBytes})`)
       }
-      const scale = shot.width > options.screenshotMaxWidth && shot.width > 0
-        ? options.screenshotMaxWidth / shot.width
-        : 1
       const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-screenshot.png' })
+      const scale = deliveredScale(shot.bounds, saved.width)
       if (args.windowId === undefined) {
         return {
           width: saved.width,
           height: saved.height,
-          scale: shot.scale * scale,
+          scale,
           attachmentId: saved.attachmentId,
           mediaType: saved.mediaType,
           bytes: saved.bytes,
@@ -644,7 +655,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       const state = windowState(args.windowId)
       // Screenshot-space coordinates are mapped through the stored image's own
       // pixel dimensions, which are also the dimensions reported to the model.
-      const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale: shot.scale * scale }
+      const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale }
       state.screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
       if (state.observation === undefined) {
         state.observation = {
@@ -674,7 +685,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         observationId: state.observation.id,
         width: saved.width,
         height: saved.height,
-        scale: shot.scale * scale,
+        scale,
         attachmentId: saved.attachmentId,
         mediaType: saved.mediaType,
         bytes: saved.bytes,
@@ -773,13 +784,15 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
           if (attachments !== undefined) {
             const shot = await ctx.computer.screenshot(owner, { windowId: ComputerWindowId(args.windowId) }, exec.signal)
             if (shot.png.byteLength <= options.screenshotMaxBytes) {
-              const scale = shot.width > options.screenshotMaxWidth
-                ? options.screenshotMaxWidth / shot.width
-                : 1
               const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-observe.png' })
               // Same coordinate space as computer_screenshot: the stored image's
               // own pixel dimensions, which are what the result declares.
-              const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale: shot.scale * scale }
+              const captured = {
+                bounds: shot.bounds,
+                width: saved.width,
+                height: saved.height,
+                scale: deliveredScale(shot.bounds, saved.width),
+              }
               windowState(args.windowId).screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
               observation.screenshot = captured
               image = {

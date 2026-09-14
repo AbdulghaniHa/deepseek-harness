@@ -13,29 +13,35 @@ export type BrowserKind = 'chrome' | 'chromium' | 'edge' | 'brave'
 interface BrowserPathSpec {
   readonly darwin: string[]
   readonly linux: string[]
-  readonly win32Name: string
+  /**
+   * Vendor/product path each browser opens under `HKCU\Software` on Windows.
+   * Every segment is its own registry key, so a flattened product name such as
+   * `Google Chrome` or `BraveSoftware Brave-Browser` never matches the key the
+   * browser consults.
+   */
+  readonly win32Key: string
 }
 
 const BROWSER_PATHS: Record<BrowserKind, BrowserPathSpec> = {
   chrome: {
     darwin: ['Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts'],
     linux: ['.config', 'google-chrome', 'NativeMessagingHosts'],
-    win32Name: 'Google Chrome',
+    win32Key: 'Google\\Chrome',
   },
   chromium: {
     darwin: ['Library', 'Application Support', 'Chromium', 'NativeMessagingHosts'],
     linux: ['.config', 'chromium', 'NativeMessagingHosts'],
-    win32Name: 'Chromium',
+    win32Key: 'Chromium',
   },
   edge: {
     darwin: ['Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts'],
     linux: ['.config', 'microsoft-edge', 'NativeMessagingHosts'],
-    win32Name: 'Microsoft Edge',
+    win32Key: 'Microsoft\\Edge',
   },
   brave: {
     darwin: ['Library', 'Application Support', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts'],
     linux: ['.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts'],
-    win32Name: 'BraveSoftware Brave-Browser',
+    win32Key: 'BraveSoftware\\Brave-Browser',
   },
 }
 
@@ -53,10 +59,7 @@ export function nativeHostManifestPath(
 ): { readonly kind: 'file'; readonly path: string } | { readonly kind: 'registry'; readonly key: string } {
   const spec = BROWSER_PATHS[browser]
   if (platform === 'win32') {
-    return {
-      kind: 'registry',
-      key: `HKCU\\Software\\${spec.win32Name}\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`,
-    }
+    return { kind: 'registry', key: windowsHostKey(browser) }
   }
   const segments = platform === 'darwin' ? spec.darwin : spec.linux
   return { kind: 'file', path: join(home, ...segments, `${NATIVE_HOST_NAME}.json`) }
@@ -70,7 +73,11 @@ export function nativeHostManifestPath(
  * @returns the HKCU key Chrome consults.
  */
 export function windowsRegistryKey(browser: BrowserKind): string {
-  return `HKCU\\Software\\${BROWSER_PATHS[browser].win32Name}\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`
+  return windowsHostKey(browser)
+}
+
+function windowsHostKey(browser: BrowserKind): string {
+  return `HKCU\\Software\\${BROWSER_PATHS[browser].win32Key}\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`
 }
 
 /** Closed browser kind list for CLI validation. */

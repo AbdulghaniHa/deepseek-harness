@@ -2889,8 +2889,6 @@ export interface Config {
   grantScope?: 'once' | 'session'
   /** Upper bound on accessibility nodes in one snapshot. */
   snapshotMaxNodes?: number
-  /** Logical max width used to scale screenshot coordinates. */
-  screenshotMaxWidth?: number
   /** Upper bound on a screenshot's encoded byte size. */
   screenshotMaxBytes?: number
   /** Cooperative timeout budget (ms) for computer tools. */
@@ -2905,7 +2903,7 @@ export interface Config {
 export type ComputerApprovalMode = 'always' | 'apps' | 'never'
 ```
 
-Source: [`packages/computer-use/tool-computer-use/src/index.ts:64`](../packages/computer-use/tool-computer-use/src/index.ts)
+Source: [`packages/computer-use/tool-computer-use/src/index.ts:61`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
