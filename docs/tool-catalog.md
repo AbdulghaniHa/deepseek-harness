@@ -41,8 +41,8 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
-| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_fill`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result` | - | browser_* tools keep Chrome Native Messaging behind ctx.browser so model-visible names stay stable when the host is disconnected. The harvest mounts `allowRawCdp: true` so `browser_cdp` is catalogued; `dsh-base` ships `enabled: false` and `allowRawCdp: false`. |
+| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_displays`, `computer_drag`, `computer_focus`, `computer_focus_element`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_set_window_bounds`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`, `ctx.computer`, `ctx.systemPrompt`, `ctx.approval optional at call time` | `tool/call`, `tool/result`, `computer/app-grant` | - | computer_* tools keep the native helper behind ctx.computer so model-visible names stay stable when the helper is down. `dsh-base` ships `enabled: false`. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2362,6 +2362,21 @@ Click a snapshot ref or raw viewport coordinates on an attached tab.
     "y": {
       "type": "number",
       "description": "Viewport y when not using a ref."
+    },
+    "button": {
+      "type": "string",
+      "description": "left, right, or middle. Defaults to left."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Click count. Defaults to 1."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2394,7 +2409,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_console`
 
-Read recent console messages from an attached tab.
+Read console messages captured from attachment onward. Filter, limit, or clear the per-tab buffer.
 
 ```json
 {
@@ -2402,6 +2417,18 @@ Read recent console messages from an attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "filter": {
+      "type": "string",
+      "description": "Substring matched against level or text, ignoring case."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum entries to return, newest kept."
+    },
+    "clear": {
+      "type": "boolean",
+      "description": "Drop retained messages after reading."
     }
   },
   "required": [
@@ -2457,6 +2484,13 @@ Drag from a snapshot ref or viewport point to another in the same frame using tr
     },
     "toY": {
       "type": "number"
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2469,7 +2503,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_evaluate`
 
-Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.
+Run a JavaScript expression in the attached tab or selected frame and return a JSON value.
 
 ```json
 {
@@ -2489,6 +2523,38 @@ Run a JavaScript expression in the attached tab or selected frame and return a J
   "required": [
     "tabId",
     "expression"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_fill`
+
+Replace the focused field's contents. Use browser_type to insert at the caret.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref to focus first."
+    },
+    "submit": {
+      "type": "boolean",
+      "description": "Press Enter after filling."
+    }
+  },
+  "required": [
+    "tabId",
+    "text"
   ]
 }
 ```
@@ -2703,7 +2769,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_press_key`
 
-Press a single key with optional modifiers on an attached tab.
+Press a single key with optional named modifiers on an attached tab.
 
 ```json
 {
@@ -2716,8 +2782,11 @@ Press a single key with optional modifiers on an attached tab.
       "type": "string"
     },
     "modifiers": {
-      "type": "integer",
-      "description": "CDP modifier bitmask."
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2751,7 +2820,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_screenshot`
 
-Capture a PNG screenshot of an attached tab. Oversized images are summarized instead of inlined.
+Capture a PNG screenshot of an attached tab. Saved as an attachment; image-capable routes receive an image block. Text-only routes still receive dimensions.
 
 ```json
 {
@@ -2775,7 +2844,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_scroll`
 
-Scroll the page or a snapshot ref on an attached tab.
+Scroll at a snapshot ref, viewport coordinates, or the viewport center when omitted.
 
 ```json
 {
@@ -2783,6 +2852,18 @@ Scroll the page or a snapshot ref on an attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref whose center receives the wheel event."
+    },
+    "x": {
+      "type": "number",
+      "description": "Viewport x when not using a ref."
+    },
+    "y": {
+      "type": "number",
+      "description": "Viewport y when not using a ref."
     },
     "deltaX": {
       "type": "number"
@@ -2829,7 +2910,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_snapshot`
 
-Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.
+Capture a ref-annotated accessibility outline of the attached tab. Filtering or paginating an existing observationId keeps the same refs; omitting it takes a fresh capture.
 
 ```json
 {
@@ -2841,6 +2922,26 @@ Capture a ref-annotated accessibility outline of the attached tab. Optional fram
     "frameId": {
       "type": "string",
       "description": "Frame id from browser_frames; defaults to the main frame."
+    },
+    "query": {
+      "type": "string",
+      "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
+    },
+    "maxDepth": {
+      "type": "integer",
+      "description": "Include nodes through this depth (root is 0)."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Skip this many matching nodes."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Return at most this many matching nodes."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Reuse this capture instead of taking a fresh snapshot."
     }
   },
   "required": [
@@ -2903,7 +3004,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_type`
 
-Type text into the focused field on an attached tab.
+Insert text at the caret on an attached tab. Use browser_fill to replace a field.
 
 ```json
 {
@@ -2918,10 +3019,6 @@ Type text into the focused field on an attached tab.
     "ref": {
       "type": "string",
       "description": "Optional snapshot ref to focus first."
-    },
-    "clear": {
-      "type": "boolean",
-      "description": "Select-all before typing."
     },
     "submit": {
       "type": "boolean",
@@ -2970,7 +3067,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_wait_for`
 
-Wait until text appears or a JS expression is truthy on an attached tab or selected frame.
+Wait until text appears or disappears, the URL matches, an element state is reached, or a JS expression is truthy. Returns matched and timedOut with the final observation.
 
 ```json
 {
@@ -2982,8 +3079,24 @@ Wait until text appears or a JS expression is truthy on an attached tab or selec
     "text": {
       "type": "string"
     },
+    "gone": {
+      "type": "boolean",
+      "description": "When true, succeed once text is absent."
+    },
+    "url": {
+      "type": "string",
+      "description": "Substring the current URL must contain."
+    },
     "expression": {
       "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "description": "enabled, disabled, selected, expanded, or collapsed on ref."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Snapshot ref whose states are polled."
     },
     "timeoutMs": {
       "type": "integer"
@@ -3046,7 +3159,7 @@ Invoke an accessibility action already advertised on a captured node: activate, 
     },
     "ref": {
       "type": "string",
-      "description": "Epoch-scoped snapshot ref."
+      "description": "Observation-scoped snapshot ref."
     },
     "action": {
       "type": "string",
@@ -3082,7 +3195,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_click`
 
-Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it. Screenshot-space coordinates bind to observationId.
+Click a snapshot ref or coordinates in a window. An ordinary unmodified single left-click may use accessibility press; other buttons, counts, and modifiers use pointer input. Screenshot-space coordinates require the exact observationId.
 
 ```json
 {
@@ -3094,7 +3207,7 @@ Click a snapshot ref or coordinates in a window. Refs prefer an accessibility pr
     },
     "ref": {
       "type": "string",
-      "description": "Epoch-scoped snapshot ref."
+      "description": "Observation-scoped snapshot ref."
     },
     "x": {
       "type": "number",
@@ -3156,6 +3269,19 @@ Read or write the system clipboard. Writes require a granted app.
   "required": [
     "action"
   ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_displays`
+
+List attached displays with branded ids, logical bounds, scale, and which one is primary.
+
+```json
+{
+  "type": "object",
+  "properties": {}
 }
 ```
 
@@ -3244,6 +3370,32 @@ Bring a window to the front.
   },
   "required": [
     "windowId"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_focus_element`
+
+Focus a snapshot ref in a window, then verify the window is in the foreground.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Observation-scoped snapshot ref."
+    }
+  },
+  "required": [
+    "windowId",
+    "ref"
   ]
 }
 ```
@@ -3349,7 +3501,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 ### `computer_press_key`
 
-Press a key in a window, with optional modifiers and repeat.
+Press a key in a window, or hold/release it. Held keys are released on cancellation, turn completion, disposal, and helper failure.
 
 ```json
 {
@@ -3373,6 +3525,10 @@ Press a key in a window, with optional modifiers and repeat.
     "repeat": {
       "type": "number",
       "description": "How many times to press. Defaults to 1."
+    },
+    "action": {
+      "type": "string",
+      "description": "press (default), down, or up."
     }
   },
   "required": [
@@ -3395,6 +3551,10 @@ Capture a window or display as an image attachment. Requires an image-capable mo
     "windowId": {
       "type": "string",
       "description": "Window to capture; omit for the full display."
+    },
+    "displayId": {
+      "type": "string",
+      "description": "Display id from computer_displays; omit for the primary display."
     },
     "region": {
       "type": "object",
@@ -3485,9 +3645,46 @@ Scroll at a snapshot ref or coordinates.
 
 Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
+### `computer_set_window_bounds`
+
+Move and resize a window in logical screen coordinates.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "x": {
+      "type": "number"
+    },
+    "y": {
+      "type": "number"
+    },
+    "width": {
+      "type": "number"
+    },
+    "height": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "windowId",
+    "x",
+    "y",
+    "width",
+    "height"
+  ]
+}
+```
+
+Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
 ### `computer_snapshot`
 
-Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes. maxDepth and a current snapshot ref select a subtree; node states and supported actions are included.
+Read the accessibility tree of a window as an observation-scoped outline. Primary observation on text-only model routes. Filtering an existing observationId keeps the same refs; omitting it takes a fresh capture.
 
 ```json
 {
@@ -3499,7 +3696,7 @@ Read the accessibility tree of a window as an epoch-scoped outline. Primary obse
     },
     "query": {
       "type": "string",
-      "description": "Optional role or name substring filter."
+      "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
     },
     "maxDepth": {
       "type": "number",
@@ -3508,6 +3705,10 @@ Read the accessibility tree of a window as an epoch-scoped outline. Primary obse
     "ref": {
       "type": "string",
       "description": "Optional current snapshot ref whose node becomes the subtree root."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Reuse this capture instead of taking a fresh snapshot."
     }
   },
   "required": [

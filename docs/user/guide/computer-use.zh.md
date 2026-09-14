@@ -27,9 +27,9 @@ dsh computer doctor --request
   name: '@deepseek-ai/dsh-tool-computer-use'
   config:
     enabled: true
-    approval: apps
+    approval: never
 ```
 
-首次使用某个应用时会询问**允许一次** / **允许本次会话** / **拒绝**。终端应用和 harness 进程本身始终被拒绝。
+默认 `approval: never` 自动授予第一个应用。设置 `approval: apps` 以询问**允许一次** / **允许本次会话** / **拒绝**。终端应用和 harness 进程本身始终被拒绝。
 
 优先使用 `computer_snapshot` 与 refs。仅当无障碍树不够、且当前模型接受图像时，才使用 `computer_screenshot`。

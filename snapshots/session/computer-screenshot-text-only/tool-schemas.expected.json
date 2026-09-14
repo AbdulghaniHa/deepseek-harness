@@ -57,7 +57,7 @@
           },
           "ref": {
             "type": "string",
-            "description": "Epoch-scoped snapshot ref."
+            "description": "Observation-scoped snapshot ref."
           },
           "action": {
             "type": "string",
@@ -85,7 +85,7 @@
     },
     {
       "name": "computer_click",
-      "description": "Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it. Screenshot-space coordinates bind to observationId.",
+      "description": "Click a snapshot ref or coordinates in a window. An ordinary unmodified single left-click may use accessibility press; other buttons, counts, and modifiers use pointer input. Screenshot-space coordinates require the exact observationId.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -95,7 +95,7 @@
           },
           "ref": {
             "type": "string",
-            "description": "Epoch-scoped snapshot ref."
+            "description": "Observation-scoped snapshot ref."
           },
           "x": {
             "type": "number",
@@ -152,6 +152,14 @@
         "required": [
           "action"
         ]
+      }
+    },
+    {
+      "name": "computer_displays",
+      "description": "List attached displays with branded ids, logical bounds, scale, and which one is primary.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
       }
     },
     {
@@ -230,6 +238,27 @@
         },
         "required": [
           "windowId"
+        ]
+      }
+    },
+    {
+      "name": "computer_focus_element",
+      "description": "Focus a snapshot ref in a window, then verify the window is in the foreground.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "windowId": {
+            "type": "string",
+            "description": "Window id from computer_apps."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Observation-scoped snapshot ref."
+          }
+        },
+        "required": [
+          "windowId",
+          "ref"
         ]
       }
     },
@@ -317,7 +346,7 @@
     },
     {
       "name": "computer_press_key",
-      "description": "Press a key in a window, with optional modifiers and repeat.",
+      "description": "Press a key in a window, or hold/release it. Held keys are released on cancellation, turn completion, disposal, and helper failure.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -339,6 +368,10 @@
           "repeat": {
             "type": "number",
             "description": "How many times to press. Defaults to 1."
+          },
+          "action": {
+            "type": "string",
+            "description": "press (default), down, or up."
           }
         },
         "required": [
@@ -356,6 +389,10 @@
           "windowId": {
             "type": "string",
             "description": "Window to capture; omit for the full display."
+          },
+          "displayId": {
+            "type": "string",
+            "description": "Display id from computer_displays; omit for the primary display."
           },
           "region": {
             "type": "object",
@@ -439,8 +476,40 @@
       }
     },
     {
+      "name": "computer_set_window_bounds",
+      "description": "Move and resize a window in logical screen coordinates.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "windowId": {
+            "type": "string",
+            "description": "Window id from computer_apps."
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "windowId",
+          "x",
+          "y",
+          "width",
+          "height"
+        ]
+      }
+    },
+    {
       "name": "computer_snapshot",
-      "description": "Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes. maxDepth and a current snapshot ref select a subtree; node states and supported actions are included.",
+      "description": "Read the accessibility tree of a window as an observation-scoped outline. Primary observation on text-only model routes. Filtering an existing observationId keeps the same refs; omitting it takes a fresh capture.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -450,7 +519,7 @@
           },
           "query": {
             "type": "string",
-            "description": "Optional role or name substring filter."
+            "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
           },
           "maxDepth": {
             "type": "number",
@@ -459,6 +528,10 @@
           "ref": {
             "type": "string",
             "description": "Optional current snapshot ref whose node becomes the subtree root."
+          },
+          "observationId": {
+            "type": "string",
+            "description": "Reuse this capture instead of taking a fresh snapshot."
           }
         },
         "required": [

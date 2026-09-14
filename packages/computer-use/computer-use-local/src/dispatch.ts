@@ -3,7 +3,7 @@
  * @module @deepseek-ai/dsh-computer-use-local/dispatch
  */
 
-import { ComputerAppId, ComputerError, ComputerWindowId } from '@deepseek-ai/dsh-computer-use'
+import { ComputerAppId, ComputerDisplayId, ComputerError, ComputerWindowId } from '@deepseek-ai/dsh-computer-use'
 import type { DesktopBackend } from './backend.ts'
 
 interface ScreenshotWire {
@@ -49,10 +49,20 @@ export async function handleComputerMethod(
       return backend.listApps()
     case 'listWindows':
       return backend.listWindows(typeof record.appId === 'string' ? ComputerAppId(record.appId) : undefined)
+    case 'listDisplays':
+      return backend.listDisplays()
     case 'launchApp':
       return backend.launchApp({ name: asString(record.name) })
     case 'focusWindow':
       await backend.focusWindow(ComputerWindowId(asString(record.windowId)))
+      return null
+    case 'setWindowBounds':
+      await backend.setWindowBounds(ComputerWindowId(asString(record.windowId)), {
+        x: asNumber(record.x),
+        y: asNumber(record.y),
+        width: asNumber(record.width),
+        height: asNumber(record.height),
+      })
       return null
     case 'windowAtPoint':
       return await backend.windowAtPoint(asNumber(record.x), asNumber(record.y)) ?? null
@@ -63,11 +73,12 @@ export async function handleComputerMethod(
         ...typeof record.query === 'string' ? { query: record.query } : {},
         ...typeof record.maxDepth === 'number' ? { maxDepth: record.maxDepth } : {},
         ...typeof record.rootHandle === 'string' ? { rootHandle: record.rootHandle } : {},
+        ...typeof record.timeoutMs === 'number' ? { timeoutMs: record.timeoutMs } : {},
       })
     case 'screenshot': {
       const shot = await backend.screenshot({
         ...typeof record.windowId === 'string' ? { windowId: ComputerWindowId(record.windowId) } : {},
-        ...typeof record.displayId === 'number' ? { displayId: record.displayId } : {},
+        ...typeof record.displayId === 'string' ? { displayId: ComputerDisplayId(record.displayId) } : {},
         ...typeof record.region === 'object' && record.region !== null
           ? { region: record.region as { x: number; y: number; width: number; height: number } }
           : {},
@@ -86,6 +97,9 @@ export async function handleComputerMethod(
       return null
     case 'setValue':
       await backend.setValue(asString(record.handle), asString(record.text))
+      return null
+    case 'focusElement':
+      await backend.focusElement(asString(record.handle))
       return null
     case 'action': {
       const action = record.action
@@ -116,6 +130,7 @@ export async function handleComputerMethod(
         key: asString(record.key),
         modifiers: Array.isArray(record.modifiers) ? record.modifiers as ('alt' | 'ctrl' | 'meta' | 'shift')[] : [],
         repeat: typeof record.repeat === 'number' ? record.repeat : 1,
+        action: record.action === 'down' || record.action === 'up' ? record.action : 'press',
       })
       return null
     case 'scroll':

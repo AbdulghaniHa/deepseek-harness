@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
   ComputerAppId,
+  ComputerDisplayId,
   ComputerError,
   ComputerWindowId,
   type ComputerA11yAction,
@@ -18,6 +19,7 @@ import {
   type ComputerApp,
   type ComputerCapability,
   type ComputerClickRequest,
+  type ComputerDisplay,
   type ComputerDragRequest,
   type ComputerKeyRequest,
   type ComputerLaunchRequest,
@@ -51,13 +53,23 @@ export interface SimulangScreenshot {
   base64(): string
 }
 
+/** Live accessibility identity used for native hit-testing on Linux. */
+export interface SimulangLiveNode {
+  ancestors(): readonly SimulangLiveNode[]
+  lowestCommonAncestor(other: SimulangLiveNode): readonly [SimulangLiveNode, number] | null
+}
+
 /** One top-level window handle. */
 export interface SimulangWindow {
   readonly title: string
   readonly pid: number
+  /** Stable native identity when the pinned addon exposes one. */
+  readonly nativeId?: string
   boundingBox(): SimulangBox
   focus(): boolean
   screenshot(hideCursor: boolean): SimulangScreenshot
+  setBounds?(box: SimulangBox): boolean
+  node?(): SimulangLiveNode
 }
 
 /** One captured accessibility node with a frozen `refId`. */
@@ -81,6 +93,7 @@ export interface SimulangTree {
   toggle(refId: number): void
   select(refId: number): void
   expandCollapse(refId: number): void
+  focus?(refId: number): void
 }
 
 /** Running application instance returned by `App.open`. */
@@ -97,6 +110,8 @@ export interface SimulangApp {
 export interface SimulangScreen {
   screenshot(hideCursor: boolean): SimulangScreenshot
   boundingBox(): SimulangBox
+  readonly nativeId?: string
+  readonly scale?: number
 }
 
 /** The local desktop. */
@@ -105,7 +120,10 @@ export interface SimulangMachine {
   windows(): readonly SimulangWindow[]
   focusedWindow(): SimulangWindow | null
   windowAtPoint(x: number, y: number): SimulangWindow | null
+  nodeAtPoint?(x: number, y: number): SimulangLiveNode | null
+  windowByNativeId?(nativeId: string): SimulangWindow | null
   mainScreen(): SimulangScreen
+  screens?(): readonly SimulangScreen[]
   screenshotCropped(x: number, y: number, width: number, height: number, hideCursor: boolean): SimulangScreenshot
   mouseButton(button: number, direction: number): void
   moveMouse(x: number, y: number, coordinate: number): void
@@ -205,6 +223,7 @@ const PRESS_ACTIONS: Readonly<Record<string, PressAction>> = {
 interface Walk {
   left: number
   readonly maxDepth?: number
+  readonly deadline?: number
   truncated: boolean
   readonly actions: Map<number, PressAction>
 }
@@ -374,22 +393,75 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
 
   const machine = module.Machine.local()
   const windowsById = new Map<ComputerWindowId, SimulangWindow>()
-  const treesByWindow = new Map<ComputerWindowId, { readonly tree: SimulangTree; readonly actions: ReadonlyMap<number, PressAction> }>()
+  const nativeToOpaque = new Map<string, ComputerWindowId>()
+  const retiredNative = new Set<string>()
+  let nextWindowSeq = 1
+  const treesByWindow = new Map<ComputerWindowId, {
+    readonly tree: SimulangTree
+    readonly actions: ReadonlyMap<number, PressAction>
+    readonly boundsByHandle: ReadonlyMap<string, ComputerRect>
+  }>()
+  const displaysById = new Map<ComputerDisplayId, SimulangScreen>()
   let enumerated: { readonly at: number; readonly windows: readonly SimulangWindow[] } | undefined
+
+  const nativeKey = (window: SimulangWindow): string => {
+    if (typeof window.nativeId === 'string' && window.nativeId.length > 0) return `native:${window.nativeId}`
+    return `title:${window.pid}:${window.title}`
+  }
+
+  const sameWindow = (left: SimulangWindow, right: SimulangWindow): boolean => {
+    if (left.nativeId !== undefined && right.nativeId !== undefined) return left.nativeId === right.nativeId
+    return left.pid === right.pid && left.title === right.title
+  }
+
+  const assignId = (window: SimulangWindow, titleDupIndex: number): ComputerWindowId => {
+    const key = nativeKey(window)
+    if (key.startsWith('native:')) {
+      if (retiredNative.has(key)) {
+        retiredNative.delete(key)
+        nativeToOpaque.delete(key)
+      }
+      const existing = nativeToOpaque.get(key)
+      if (existing !== undefined) return existing
+      const id = ComputerWindowId(`w${nextWindowSeq}`)
+      nextWindowSeq += 1
+      nativeToOpaque.set(key, id)
+      return id
+    }
+    const base = `${window.pid}:${window.title}`
+    return ComputerWindowId(titleDupIndex === 1 ? base : `${base}#${titleDupIndex}`)
+  }
 
   const enumerateWindows = (fresh: boolean): readonly SimulangWindow[] => {
     if (!fresh && enumerated !== undefined && now() - enumerated.at < windowCacheMs) return enumerated.windows
     const windows = machine.windows()
     enumerated = { at: now(), windows }
     const seen = new Map<string, number>()
-    windowsById.clear()
+    const liveNative = new Set<string>()
+    const nextById = new Map<ComputerWindowId, SimulangWindow>()
     for (const window of windows) {
-      const base = `${window.pid}:${window.title}`
-      const count = (seen.get(base) ?? 0) + 1
-      seen.set(base, count)
-      windowsById.set(ComputerWindowId(count === 1 ? base : `${base}#${count}`), window)
+      const key = nativeKey(window)
+      if (key.startsWith('native:')) liveNative.add(key)
+      const titleBase = `${window.pid}:${window.title}`
+      const count = (seen.get(titleBase) ?? 0) + 1
+      seen.set(titleBase, count)
+      nextById.set(assignId(window, count), window)
     }
+    for (const [key, id] of [...nativeToOpaque.entries()]) {
+      if (!liveNative.has(key)) {
+        retiredNative.add(key)
+        nativeToOpaque.delete(key)
+        treesByWindow.delete(id)
+      }
+    }
+    windowsById.clear()
+    for (const [id, window] of nextById) windowsById.set(id, window)
     return windows
+  }
+
+  const isFocused = (window: SimulangWindow, focused: SimulangWindow | null): boolean => {
+    if (focused === null) return false
+    return sameWindow(window, focused)
   }
 
   const listWindows = (): ComputerWindow[] => {
@@ -400,7 +472,7 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       appId: appIdOf(window.pid),
       title: window.title,
       bounds: windowBounds(window),
-      focused: focused !== null && focused.pid === window.pid && focused.title === window.title && !String(id).includes('#'),
+      focused: isFocused(window, focused) && !String(id).includes('#'),
     }))
   }
 
@@ -414,9 +486,36 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
   }
 
   const toWindow = (window: SimulangWindow, focused: boolean): ComputerWindow => {
-    const id = ComputerWindowId(`${window.pid}:${window.title}`)
-    windowsById.set(id, window)
-    return { id, appId: appIdOf(window.pid), title: window.title, bounds: windowBounds(window), focused }
+    enumerateWindows(false)
+    for (const [id, cached] of windowsById) {
+      if (sameWindow(cached, window)) {
+        return { id, appId: appIdOf(window.pid), title: window.title, bounds: windowBounds(window), focused }
+      }
+    }
+    const lookup = window.nativeId !== undefined && typeof machine.windowByNativeId === 'function'
+      ? machine.windowByNativeId(window.nativeId)
+      : null
+    const resolved = lookup ?? window
+    const id = assignId(resolved, 1)
+    windowsById.set(id, resolved)
+    return { id, appId: appIdOf(resolved.pid), title: resolved.title, bounds: windowBounds(resolved), focused }
+  }
+
+  const listDisplayScreens = (): readonly ComputerDisplay[] => {
+    const screens = typeof machine.screens === 'function' ? machine.screens() : [machine.mainScreen()]
+    displaysById.clear()
+    return screens.map((screen, index) => {
+      const native = screen.nativeId
+      const id = ComputerDisplayId(typeof native === 'string' && native.length > 0 ? `d:${native}` : `d${index + 1}`)
+      displaysById.set(id, screen)
+      const bounds = rect(screen.boundingBox())
+      return {
+        id,
+        bounds,
+        scale: typeof screen.scale === 'number' && screen.scale > 0 ? screen.scale : 1,
+        primary: index === 0,
+      }
+    })
   }
 
   const toScreenshot = (shot: SimulangScreenshot, bounds: ComputerRect): ComputerScreenshot => {
@@ -460,6 +559,10 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
   }
 
   const mapNode = (node: SimulangNode, windowId: ComputerWindowId, walk: Walk, depth: number): ComputerSnapshotNode | undefined => {
+    if (walk.deadline !== undefined && now() >= walk.deadline) {
+      walk.truncated = true
+      return undefined
+    }
     if (walk.left <= 0) {
       walk.truncated = true
       return undefined
@@ -561,6 +664,10 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       })
     },
 
+    listDisplays(): Promise<readonly ComputerDisplay[]> {
+      return settle(() => listDisplayScreens())
+    },
+
     launchApp(request: ComputerLaunchRequest): Promise<ComputerApp> {
       return settle(() => {
         const instance = machine.app(request.name).open(null, module.FocusPolicy.Steal, module.Visibility.Show, true)
@@ -575,10 +682,33 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       })
     },
 
+    setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect): Promise<void> {
+      return settle(() => {
+        const window = requireWindow(windowId)
+        if (typeof window.setBounds !== 'function') {
+          throw new ComputerError('setWindowBounds is not supported by this simulang build', 'COMPUTER_UNSUPPORTED')
+        }
+        window.setBounds({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height })
+      })
+    },
+
     windowAtPoint(x: number, y: number): Promise<ComputerWindow | undefined> {
       return settle(() => {
         const hit = machine.windowAtPoint(x, y)
-        return hit === null ? undefined : toWindow(hit, false)
+        if (hit !== null) return toWindow(hit, false)
+        // v13 returns null for windowAtPoint on Linux; AT-SPI still identifies the hit node.
+        const node = machine.nodeAtPoint?.(x, y)
+        if (node === undefined || node === null) return undefined
+        enumerateWindows(true)
+        for (const [id, window] of windowsById) {
+          const root = window.node?.()
+          if (root === undefined) continue
+          const common = root.lowestCommonAncestor(node)
+          if (common !== null && common[1] === root.ancestors().length) {
+            return { id, appId: appIdOf(window.pid), title: window.title, bounds: windowBounds(window), focused: false }
+          }
+        }
+        return undefined
       })
     },
 
@@ -596,11 +726,19 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
         const walk: Walk = {
           left: request.maxNodes,
           ...request.maxDepth === undefined ? {} : { maxDepth: request.maxDepth },
+          ...request.timeoutMs === undefined ? {} : { deadline: now() + request.timeoutMs },
           truncated: false,
           actions: new Map(),
         }
         const mapped = mapNode(start, request.windowId, walk, 0)
-        treesByWindow.set(request.windowId, { tree, actions: walk.actions })
+        const boundsByHandle = new Map<string, ComputerRect>()
+        const collectBounds = (node: ComputerSnapshotNode | undefined): void => {
+          if (node === undefined) return
+          if (node.handle.length > 0) boundsByHandle.set(node.handle, node.bounds)
+          for (const child of node.children ?? []) collectBounds(child)
+        }
+        collectBounds(mapped)
+        treesByWindow.set(request.windowId, { tree, actions: walk.actions, boundsByHandle })
         return {
           windowId: request.windowId,
           appId: appIdOf(window.pid),
@@ -621,6 +759,14 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
           const window = requireWindow(request.windowId)
           return toScreenshot(window.screenshot(true), rect(window.boundingBox()))
         }
+        if (request.displayId !== undefined) {
+          if (displaysById.size === 0) listDisplayScreens()
+          const screen = displaysById.get(request.displayId)
+          if (screen === undefined) {
+            throw new ComputerError(`display "${request.displayId}" is gone`, 'COMPUTER_WINDOW_GONE')
+          }
+          return toScreenshot(screen.screenshot(true), rect(screen.boundingBox()))
+        }
         const screen = machine.mainScreen()
         return toScreenshot(screen.screenshot(true), rect(screen.boundingBox()))
       })
@@ -637,6 +783,26 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
       return settle(() => {
         const { tree, refId } = requireTree(handle)
         tree.setValue(refId, text)
+      })
+    },
+
+    focusElement(handle: string): Promise<void> {
+      return settle(() => {
+        const parsed = parseHandle(handle)
+        const entry = treesByWindow.get(parsed.windowId)
+        if (entry === undefined) {
+          throw new ComputerError(`no snapshot is loaded for window "${parsed.windowId}"`, 'COMPUTER_STALE_REF')
+        }
+        if (typeof entry.tree.focus === 'function') {
+          entry.tree.focus(parsed.refId)
+          return
+        }
+        const bounds = entry.boundsByHandle.get(handle)
+        if (bounds === undefined) {
+          throw new ComputerError(`unknown accessibility handle "${handle}"`, 'COMPUTER_STALE_REF')
+        }
+        machine.moveMouse(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, module.Coordinate.Abs)
+        machine.mouseButton(module.Button.Left, module.Direction.Click)
       })
     },
 
@@ -671,6 +837,15 @@ export function createSimulangBackend(module: SimulangModule, options: SimulangB
     key(request: ComputerKeyRequest): Promise<void> {
       return settle(() => {
         const code = keyCode(request.key)
+        const action = request.action ?? 'press'
+        if (action === 'down') {
+          machine.key(code, module.Direction.Press)
+          return
+        }
+        if (action === 'up') {
+          machine.key(code, module.Direction.Release)
+          return
+        }
         withModifiers(request.modifiers, () => {
           for (let index = 0; index < (request.repeat ?? 1); index += 1) {
             machine.key(code, module.Direction.Click)

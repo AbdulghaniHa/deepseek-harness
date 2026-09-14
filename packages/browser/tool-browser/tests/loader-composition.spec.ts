@@ -110,6 +110,19 @@ describe('tool-browser real Loader composition through cordis.yml', () => {
     })
   }, 30_000)
 
+  it('completes a mutating call with default never-mode and no approval service', async () => {
+    const ctx = await boot([])
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId('open'),
+      name: 'browser_open',
+      arguments: { url: 'https://example.com/opened' },
+      agent: { id: SessionId('loader') } as unknown as import('@deepseek-ai/dsh-agent').Agent,
+    })
+    expect(result.isError).toBe(false)
+    expect(result.value).toMatchObject({ tabId: 'opened' })
+  }, 30_000)
+
   it('leaves tools unregistered when enabled is false', async () => {
     const ctx = await boot(['    enabled: false'])
     expect(ctx.tools.schemas().map(schema => schema.name)).not.toContain('browser_tabs')

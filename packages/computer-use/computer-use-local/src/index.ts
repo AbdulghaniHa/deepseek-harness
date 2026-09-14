@@ -42,6 +42,7 @@ export type {
   SimulangBox,
   SimulangInstance,
   SimulangLogRecord,
+  SimulangLiveNode,
   SimulangMachine,
   SimulangModule,
   SimulangNode,
@@ -115,7 +116,7 @@ export function apply(ctx: Context, config: Config): void {
     windowCacheMs: resolved.windowCacheMs,
   })
   ctx.computer.registerProvider(provider)
-  ctx.effect(() => () => {
-    void provider.dispose()
+  ctx.effect(() => async () => {
+    await provider.dispose()
   }, 'computer-use-local helper teardown')
 }

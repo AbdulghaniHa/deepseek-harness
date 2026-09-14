@@ -106,6 +106,7 @@ export function decodeLines(chunk: string, pending: string): {
  * @param value - decoded JSON.
  * @returns whether the value is a request.
  */
+/* jscpd:ignore-start -- JSON-RPC request narrowing is identical on the browser extension protocol. */
 export function isRpcRequest(value: unknown): value is ComputerRpcRequest {
   if (typeof value !== 'object' || value === null) return false
   const record = value as Record<string, unknown>
@@ -125,6 +126,7 @@ export function isRpcResponse(value: unknown): value is ComputerRpcResponse {
   const record = value as Record<string, unknown>
   return record.jsonrpc === '2.0' && typeof record.id === 'number' && record.method === undefined
 }
+/* jscpd:ignore-end */
 
 /**
  * Reject a request whose protocol version does not match this build.

@@ -36,6 +36,9 @@
       "path": "../../core/system-prompt"
     },
     {
+      "path": "../../attachment/attachment"
+    },
+    {
       "path": "../../interaction/user-approval"
     },
     {

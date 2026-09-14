@@ -1458,6 +1458,11 @@
     },
     {
       "doc": "docs/subsystems/computer-use.md",
+      "symbol": "ComputerDisplay",
+      "source": "packages/computer-use/computer-use/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/computer-use.md",
       "symbol": "ComputerSnapshotNode",
       "source": "packages/computer-use/computer-use/src/types.ts"
     },
@@ -1468,7 +1473,17 @@
     },
     {
       "doc": "docs/subsystems/computer-use.md",
+      "symbol": "ComputerRect",
+      "source": "packages/computer-use/computer-use/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/computer-use.md",
       "symbol": "ComputerScreenshotRequest",
+      "source": "packages/computer-use/computer-use/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/computer-use.md",
+      "symbol": "ComputerKeyRequest",
       "source": "packages/computer-use/computer-use/src/types.ts"
     },
     {

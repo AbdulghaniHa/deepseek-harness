@@ -87,6 +87,7 @@ describe('browser toolview registration', () => {
     expect(registered.map(row => row.key)).toContain('browser_drag')
     expect(registered.map(row => row.key)).toContain('browser_wait_for_download')
     expect(registered.map(row => row.key)).toContain('browser_cdp')
+    expect(registered.map(row => row.key)).toContain('browser_fill')
     expect(registered.every(row => row.component === BrowserRow)).toBe(true)
     expect(registered.every(row => row.locale === 'conversation')).toBe(true)
     expect(browserToolview.inject).toEqual(['slots'])

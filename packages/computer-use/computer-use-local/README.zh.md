@@ -54,7 +54,9 @@ kind: "package-reference"
 
 插件在 `ctx.computer` 上注册 `LocalComputerProvider`，并随 fiber 释放 helper。`ComputerHostClient` 在子进程管道上成帧 JSON-RPC 行。helper 中的 `handleComputerMethod` 分发到 `DesktopBackend`（simulang 或平台）。插件把 `windowCacheMs` 作为 argv 上的 `--window-cache-ms=<n>` 转发给 helper。
 
-simulang 适配器每个 helper 绑定一次 `Machine.local()`。窗口 id 为 `<pid>:<title>`（标题重复时加 `#n` 后缀），应用 id 为 `pid:<pid>`，应用名来自 `ps` / `tasklist`，以便固定拒绝列表匹配真实进程名。`snapshot` 构建 `AccessibilityTree.fromWindow(window).snapshot()`，按窗口保留该树，并返回 `<refId>@<windowId>` 句柄；`press` 按快照时记录的角色分发（`activate`、`toggle`、`select` 或 `expandCollapse`），`setValue` 直接调用该树。`password` 节点为 `secure` 且不携带值。指针与按键输入通过 `Machine` 合成，修饰键在动作前后按住与释放；按键名接受 simulang 的 `keyFromString` 词汇，另加 `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`、空格、`Esc`、`Cmd` 与 `Ctrl`。适配器安装 simulang 的 logger，使原生日志行进入 stderr，而不是 JSON-RPC 的 stdout。
+提供方 dispose 会等待 key-up 调用后才终止 helper，包括响应失败的 key-down 调用。当 simulang 未返回窗口命中时，通过实时无障碍命中节点及其原生祖先身份确定窗口；仅凭坐标无法认定匹配。
+
+simulang 适配器每个 helper 绑定一次 `Machine.local()`。当 addon 报告 `nativeId` 时，窗口 id 是受 helper 生命周期围栏的不透明 `wN` 值，标题变化后仍然有效；销毁后再创建的原生句柄会铸造新 id。当没有 `nativeId` 时，id 仍为 `<pid>:<title>`（标题重复时加 `#n` 后缀）。应用 id 为 `pid:<pid>`，应用名来自 `ps` / `tasklist`，以便固定拒绝列表匹配真实进程名。`snapshot` 构建 `AccessibilityTree.fromWindow(window).snapshot()`，按窗口保留该树，并返回 `<refId>@<windowId>` 句柄；`press` 按快照时记录的角色分发（`activate`、`toggle`、`select` 或 `expandCollapse`），`setValue` 直接调用该树。`password` 节点为 `secure` 且不携带值。指针与按键输入通过 `Machine` 合成，修饰键在动作前后按住与释放；按键名接受 simulang 的 `keyFromString` 词汇，另加 `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`、空格、`Esc`、`Cmd` 与 `Ctrl`。适配器安装 simulang 的 logger，使原生日志行进入 stderr，而不是 JSON-RPC 的 stdout。
 
 | 文件 | 职责 |
 |---|---|
@@ -94,6 +96,7 @@ simulang 适配器每个 helper 绑定一次 `Machine.local()`。窗口 id 为 `
 
 <a id="known-limitations-and-deferred-work"></a>
 
+- **原生扩展尚未完成** — 已发布的 v13 缺少稳定的原生窗口 id 和窗口尺寸调整；适配器中的可选方法并未提供这些功能。构建补丁二进制需要访问上游私有 Rust 依赖。树 focus 缺失时，元素聚焦回退为指针点击。
 - **Windows 仅限前台** — 合成输入无法瞄准后台窗口。
 - **Wayland 输入不受支持** — 设置 `WAYLAND_DISPLAY` 时 doctor 报告 `inputInjection: denied`。
 - **原生二进制是可选的** — `@simular-ai/simulang-js` 仅为 macOS、Linux glibc 和 Windows x64/arm64 提供预编译二进制；其他平台上操作系统回退提供截图与剪贴板，而无障碍快照、`press` 与 `setValue` 抛出 `COMPUTER_UNSUPPORTED`。

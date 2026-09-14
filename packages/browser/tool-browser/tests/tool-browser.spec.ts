@@ -21,6 +21,7 @@ import {
   buildSnapshot,
   cdpClient,
   clickAt,
+  evaluateJson,
   createNetworkCapture,
   dragAt,
   flattenFrameTree,
@@ -33,7 +34,9 @@ import {
   presentBrowserCall,
   presentBrowserResult,
   resolveRef,
+  resolveRefFrom,
   SNAPSHOT_REF,
+  viewSnapshot,
   typeText,
 } from '@deepseek-ai/dsh-tool-browser'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
@@ -41,7 +44,10 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 const signal = new AbortController().signal
 
 function agent(id = 'owner'): Agent {
-  return { id: SessionId(id) } as unknown as Agent
+  return {
+    id: SessionId(id),
+    options: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  } as unknown as Agent
 }
 
 function tab(id: string, overrides: Partial<BrowserTab> = {}): BrowserTab {
@@ -85,6 +91,7 @@ function makeProvider(cdpImpl?: (method: string, params?: Readonly<Record<string
   emit(event: BrowserCdpEvent): void
 } {
   const events = new Set<(event: BrowserCdpEvent) => void>()
+  let resolvedBackendId = 1
   const first = tab('1')
   const tabs: BrowserTab[] = [first]
   return {
@@ -104,7 +111,25 @@ function makeProvider(cdpImpl?: (method: string, params?: Readonly<Record<string
       if (index >= 0) tabs.splice(index, 1)
       return Promise.resolve()
     },
-    cdp: request => Promise.resolve(cdpImpl?.(request.method, request.params) ?? {}),
+    cdp: (request) => {
+      const custom = cdpImpl?.(request.method, request.params)
+      if (request.method === 'DOM.getNodeForLocation') return Promise.resolve({ backendNodeId: resolvedBackendId })
+      if (request.method === 'DOM.getBoxModel' && (custom === undefined || !('model' in (custom as object)))) {
+        return Promise.resolve({ model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } })
+      }
+      if (request.method === 'DOM.resolveNode') {
+        resolvedBackendId = request.params?.['backendNodeId'] as number
+        const rec = custom as { object?: { objectId?: string } } | undefined
+        if (rec?.object?.objectId === undefined) return Promise.resolve({ object: { objectId: 'obj' } })
+      }
+      if (request.method === 'Runtime.callFunctionOn') {
+        const rec = custom as { result?: { value?: { ok?: boolean } }; exceptionDetails?: unknown } | undefined
+        if (rec?.result?.value?.ok === undefined && rec?.exceptionDetails === undefined) {
+          return Promise.resolve({ result: { value: { ok: true, x: 5, y: 5, width: 10, height: 10 } } })
+        }
+      }
+      return Promise.resolve(custom ?? {})
+    },
     onCdpEvent: (listener) => {
       events.add(listener)
       return () => { events.delete(listener) }
@@ -158,11 +183,22 @@ async function mount(opts: {
 }
 
 describe('snapshot builder', () => {
+  it('repaginates and requeries the full retained observation', () => {
+    const snapshot = buildSnapshot(['A', 'B', 'C'].map((name, index) => ({
+      nodeId: String(index), role: { value: 'button' }, name: { value: name },
+    })), { url: 'u', title: 't', observationId: '1', maxFieldChars: 100, maxNodes: 10 })
+    const first = viewSnapshot(snapshot, { offset: 0, limit: 1 })
+    expect(first.nodes.map(node => node.name)).toEqual(['A'])
+    expect(viewSnapshot(first, { offset: 1, limit: 1 }).nodes.map(node => node.name)).toEqual(['B'])
+    expect(viewSnapshot(first, { query: 'C' }).nodes.map(node => node.name)).toEqual(['C'])
+  })
+
   it('mints epoch refs, redacts secrets, and truncates', () => {
     const snapshot = buildSnapshot(axTree().nodes, {
       url: 'https://example.com',
       title: 'Home',
-      epoch: 3,
+      observationId: '3',
+      maxFieldChars: 2000,
       maxNodes: 3,
     })
     expect(snapshot.nodes).toHaveLength(3)
@@ -178,16 +214,83 @@ describe('snapshot builder', () => {
     const dup = buildSnapshot([
       { nodeId: '1', role: { value: 'RootWebArea' }, name: { value: 'Home' }, childIds: ['2', '2'] },
       { nodeId: '2', role: { value: 'button' }, name: { value: 'Once' } },
-    ], { url: 'https://example.com', title: 'Home', epoch: 1, maxNodes: 8 })
+    ], { url: 'https://example.com', title: 'Home', observationId: '1', maxFieldChars: 2000, maxNodes: 8 })
     expect(dup.nodes.filter(node => node.role === 'button')).toHaveLength(1)
     const framed = buildSnapshot(axTree().nodes, {
       url: 'https://example.com',
       title: 'Home',
-      epoch: 1,
+      observationId: '1',
+      maxFieldChars: 2000,
       maxNodes: 8,
       frameId: 'child',
     })
     expect(framed.nodes[0]?.frameId).toBe('child')
+    const queried = viewSnapshot(snapshot, { query: 'button' })
+    expect(queried.allNodes.map(node => node.ref)).toEqual(snapshot.allNodes.map(node => node.ref))
+    expect(queried.nodes.some(node => node.role === 'button')).toBe(true)
+    const paged = viewSnapshot(snapshot, { offset: 1, limit: 1 })
+    expect(paged.nodes).toHaveLength(1)
+    expect(paged.truncated).toBe(true)
+    expect(paged.allNodes).toEqual(snapshot.allNodes)
+    const states = buildSnapshot([
+      {
+        nodeId: 'r',
+        role: { value: 'RootWebArea' },
+        name: { value: 'Home' },
+        childIds: ['c'],
+      },
+      {
+        nodeId: 'c',
+        role: { value: 'checkbox' },
+        name: { value: 'All' },
+        properties: [
+          { name: 'checked', value: { value: 'mixed' } },
+          { name: 'selected', value: { value: true } },
+          { name: 'expanded', value: { value: true } },
+          { name: 'expanded', value: { value: false } },
+          { name: 'disabled', value: { value: true } },
+          { name: 'readonly', value: { value: false } },
+          { name: 'editable', value: { value: true } },
+        ],
+      },
+    ], { url: 'u', title: 't', observationId: '9', maxFieldChars: 2000, maxNodes: 10 })
+    expect(states.nodes[1]?.states).toEqual(expect.arrayContaining([
+      'mixed', 'selected', 'expanded', 'collapsed', 'disabled', 'editable',
+    ]))
+    const checked = buildSnapshot([
+      {
+        nodeId: 'r',
+        role: { value: 'checkbox' },
+        name: { value: 'On' },
+        properties: [{ name: 'checked', value: { value: true } }],
+      },
+    ], { url: 'u', title: 't', observationId: '9', maxFieldChars: 2000, maxNodes: 10 })
+    expect(checked.nodes[0]?.states).toContain('checked')
+    const shallow = buildSnapshot(axTree().nodes, {
+      url: 'https://example.com',
+      title: 'Home',
+      observationId: '4',
+      maxFieldChars: 2000,
+      maxNodes: 8,
+      maxDepth: 0,
+    })
+    expect(shallow.nodes.every(node => node.depth === 0)).toBe(true)
+    const pagedBuild = buildSnapshot(axTree().nodes, {
+      url: 'https://example.com',
+      title: 'Home',
+      observationId: '5',
+      maxFieldChars: 2000,
+      maxNodes: 8,
+      query: 'button',
+      offset: 0,
+      limit: 1,
+    })
+    expect(pagedBuild.nodes).toHaveLength(1)
+    expect(pagedBuild.allNodes.length).toBeGreaterThan(1)
+    expect(resolveRefFrom('3-e0', snapshot.allNodes, '3').role).toBe('RootWebArea')
+    expect(() => resolveRefFrom('nope', snapshot.allNodes, '3')).toThrow('invalid snapshot ref')
+    expect(() => resolveRefFrom('2-e0', snapshot.allNodes, '3')).toThrow('stale snapshot ref')
+    expect(() => resolveRefFrom('3-e9', snapshot.allNodes, '3')).toThrow('unknown snapshot ref')
     expect(flattenFrameTree({
       frame: { id: 'root', url: 'https://example.com', name: 'main', securityOrigin: 'https://example.com' },
       childFrames: [
@@ -215,13 +318,13 @@ describe('snapshot builder', () => {
         properties: [{ name: 'autocomplete', value: { value: 'cc-number' } }],
       },
       { nodeId: '2', role: { value: 'generic' }, ignored: true },
-    ], { url: 'u', title: 't', epoch: 1, maxNodes: 10 })
+    ], { url: 'u', title: 't', observationId: '1', maxFieldChars: 2000, maxNodes: 10 })
     expect(snapshot.nodes[0]?.value).toBe('<redacted>')
     expect(snapshot.nodes.some(node => node.role === 'generic')).toBe(false)
   })
 
   it('renders an empty page when nothing is collectable', () => {
-    const snapshot = buildSnapshot([], { url: 'u', title: 't', epoch: 1, maxNodes: 10 })
+    const snapshot = buildSnapshot([], { url: 'u', title: 't', observationId: '1', maxFieldChars: 2000, maxNodes: 10 })
     expect(snapshot.text).toBe('(empty page)')
   })
 
@@ -238,7 +341,7 @@ describe('snapshot builder', () => {
         name: { value: 'Token' },
         properties: [{ name: 'autocomplete' }],
       },
-    ], { url: 'u', title: 't', epoch: 1, maxNodes: 10 })
+    ], { url: 'u', title: 't', observationId: '1', maxFieldChars: 2000, maxNodes: 10 })
     expect(snapshot.nodes.some(node => node.name === 'Keep')).toBe(true)
     expect(snapshot.nodes.some(node => node.value === 'plain')).toBe(true)
     expect(snapshot.text).toContain('NoRole')
@@ -248,7 +351,7 @@ describe('snapshot builder', () => {
     const snapshot = buildSnapshot([
       { nodeId: 'r', role: { value: 'RootWebArea' }, name: { value: 'R' }, childIds: ['a', 'a'] },
       { nodeId: 'a', role: { value: 'button' }, name: { value: 'Once' } },
-    ], { url: 'u', title: 't', epoch: 1, maxNodes: 10 })
+    ], { url: 'u', title: 't', observationId: '1', maxFieldChars: 2000, maxNodes: 10 })
     expect(snapshot.nodes.filter(node => node.name === 'Once')).toHaveLength(1)
   })
 
@@ -256,7 +359,7 @@ describe('snapshot builder', () => {
     const snapshot = buildSnapshot([
       { role: { value: 'generic' }, childIds: ['missing'] },
       { nodeId: 'loop', role: { value: 'button' }, name: { value: 'X' }, childIds: ['loop'] },
-    ], { url: 'u', title: 't', epoch: 1, maxNodes: 10 })
+    ], { url: 'u', title: 't', observationId: '1', maxFieldChars: 2000, maxNodes: 10 })
     expect(snapshot.nodes.some(node => node.name === 'X')).toBe(true)
   })
 })
@@ -409,7 +512,18 @@ describe('presenters and CDP helpers', () => {
     }
     expect(await pageIdentity(cdp)).toEqual({ url: 'https://page', title: 'Page' })
     await clickAt(cdp, 1, 2)
+    await clickAt(cdp, 3, 4, { button: 'middle', count: 2 })
     await typeText(cdp, 'ab')
+    await expect(evaluateJson({
+      send: async () => ({ exceptionDetails: { exception: { description: 'TypeError: x' } } }),
+    }, '1')).rejects.toThrow('TypeError: x')
+    await expect(evaluateJson({
+      send: async () => ({ exceptionDetails: { text: 'SyntaxError' } }),
+    }, '1')).rejects.toThrow('SyntaxError')
+    await expect(evaluateJson({
+      send: async () => ({ exceptionDetails: {} }),
+    }, '1')).rejects.toThrow('evaluate threw')
+    expect(await evaluateJson({ send: async () => ({ result: { value: 4 } }) }, '1+1', 7)).toBe(4)
     await dragAt(cdp, { x: 1, y: 2 }, { x: 8, y: 9 })
     expect(await nodeCenter(cdp, 9)).toEqual({ x: 5, y: 5 })
     expect(sent.some(item => item.method === 'Input.dispatchMouseEvent')).toBe(true)
@@ -658,11 +772,12 @@ describe('tool-browser plugin', () => {
     await ctx.browser.attach(owner, BrowserTabId('1'))
     await call('browser_snapshot', { tabId: '1' })
     expect((await call('browser_click', { tabId: '1', ref: '1-e1' })).isError).toBe(false)
-    expect((await call('browser_type', { tabId: '1', text: 'hi', ref: '2-e1', clear: true, submit: true })).isError).toBe(false)
-    expect((await call('browser_press_key', { tabId: '1', key: 'Enter', modifiers: 0 })).isError).toBe(false)
+    expect((await call('browser_type', { tabId: '1', text: 'hi', ref: '2-e1', submit: true })).isError).toBe(false)
+    expect((await call('browser_fill', { tabId: '1', text: 'replaced', ref: '3-e1', submit: true })).isError).toBe(false)
+    expect((await call('browser_press_key', { tabId: '1', key: 'Enter', modifiers: ['shift'] })).isError).toBe(false)
     expect((await call('browser_press_key', { tabId: '1', key: 'Tab' })).isError).toBe(false)
     expect((await call('browser_scroll', { tabId: '1', deltaY: 80 })).isError).toBe(false)
-    expect((await call('browser_hover', { tabId: '1', ref: '6-e1' })).isError).toBe(false)
+    expect((await call('browser_hover', { tabId: '1', ref: '7-e1' })).isError).toBe(false)
     expect((await call('browser_hover', { tabId: '1', x: 1, y: 1 })).isError).toBe(false)
     expect((await call('browser_click', { tabId: '1', x: 3, y: 4 })).isError).toBe(false)
     const noTarget = await call('browser_click', { tabId: '1' })
@@ -671,24 +786,159 @@ describe('tool-browser plugin', () => {
     expect(stale.isError).toBe(true)
   })
 
+  it('covers screenshot attachments, snapshot reuse, fill, scroll refs, and console clear', async () => {
+    const { call, owner, ctx, provider } = await mount({
+      cdp: (method, params) => {
+        if (method === 'Runtime.evaluate') {
+          const expression = typeof params?.expression === 'string' ? params.expression : ''
+          if (expression.includes('innerText')) return {}
+          if (expression.includes('location.href')) return { result: { value: { url: 'https://other.example', title: 'X' } } }
+          return { result: { value: { url: 'https://example.com', title: 'Home' } } }
+        }
+        if (method === 'Accessibility.getFullAXTree') return axTree()
+        if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
+        if (method === 'Page.captureScreenshot') return { data: 'AAAA' }
+        if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 400, clientHeight: 300 } }
+        return {}
+      },
+    })
+    ctx.provide('attachments', {
+      saveImage: async (input: { data: Uint8Array }) => ({
+        attachmentId: 'att-1',
+        mediaType: 'image/png',
+        bytes: input.data.byteLength,
+        width: 2,
+        height: 2,
+      }),
+    })
+    ctx.provide('llm', {
+      resolveModelInfo: async () => ({ inputModalities: ['image'] }),
+    })
+    await ctx.browser.attach(owner, BrowserTabId('1'))
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 's-arr', targetInfo: [] },
+      sessionId: 's-arr',
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextCreated',
+      params: { context: [] },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextCreated',
+      params: { context: { id: 9, auxData: { frameId: 1 } } },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextDestroyed',
+      params: { executionContextId: 999 },
+    })
+    const first = await call('browser_snapshot', { tabId: '1', query: 'button', offset: 0, limit: 2 })
+    expect(first.isError).toBe(false)
+    const observationId = (first.value as { observationId: string }).observationId
+    expect((await call('browser_snapshot', { tabId: '1', observationId })).value).toMatchObject({ observationId })
+    const refSnap = await call('browser_snapshot', { tabId: '1' })
+    const e1 = /\[(\d+-e1)\]/.exec(textOf(refSnap))?.[1]
+    const e0 = /\[(\d+-e0)\]/.exec(textOf(refSnap))?.[1]
+    expect((await call('browser_click', { tabId: '1', ref: e1, button: 'middle', count: 2, modifiers: ['shift'] })).isError).toBe(false)
+    const afterClick = await call('browser_snapshot', { tabId: '1' })
+    const fillRef = /\[(\d+-e1)\]/.exec(textOf(afterClick))?.[1]
+    expect((await call('browser_fill', { tabId: '1', text: 'solo' })).isError).toBe(false)
+    const afterFill = await call('browser_snapshot', { tabId: '1' })
+    const scrollRef = /\[(\d+-e1)\]/.exec(textOf(afterFill))?.[1]
+    expect((await call('browser_scroll', { tabId: '1', ref: scrollRef })).isError).toBe(false)
+    expect((await call('browser_scroll', { tabId: '1', x: 2, y: 3, deltaX: 1 })).isError).toBe(false)
+    const afterScroll = await call('browser_snapshot', { tabId: '1' })
+    const selectRef = /\[(\d+-e1)\]/.exec(textOf(afterScroll))?.[1]
+    expect((await call('browser_select_option', { tabId: '1', ref: selectRef, value: 'A' })).isError).toBe(false)
+    expect((await call('browser_wait_for', { tabId: '1', url: 'nomatch', timeoutMs: 1 })).value)
+      .toMatchObject({ timedOut: true })
+    expect((await call('browser_wait_for', { tabId: '1', text: 'Missing', timeoutMs: 1 })).value)
+      .toMatchObject({ timedOut: true })
+    const saved = await call('browser_screenshot', { tabId: '1' })
+    expect(saved.value).toMatchObject({ attachmentId: 'att-1', width: 2, height: 2 })
+    ctx.tools.get('browser_screenshot')?.output.render({ tabId: '1' }, {
+      tabId: '1', mimeType: 'image/png', bytes: 4, truncated: true,
+    })
+    ctx.tools.get('browser_screenshot')?.output.render({ tabId: '1' }, {
+      tabId: '1', mimeType: 'image/png', bytes: 4, truncated: false, width: 2, height: 2, attachmentId: 'att-1',
+    })
+    ctx.tools.get('browser_screenshot')?.output.render({ tabId: '1' }, {
+      tabId: '1', mimeType: 'image/png', bytes: 4, truncated: false,
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.consoleAPICalled',
+      params: { type: 'log', args: [{ value: 'keep' }], timestamp: 9 },
+    })
+    expect((await call('browser_console', { tabId: '1', clear: true })).value).toMatchObject({
+      messages: [{ level: 'log', text: 'keep', timestamp: 9 }],
+    })
+    expect((await call('browser_console', { tabId: '1' })).value).toMatchObject({ messages: [] })
+    const tiny = await mount({
+      config: { approval: 'never', textMaxBytes: 4 },
+      cdp: method => method === 'Runtime.evaluate' ? { result: { value: 'abcdef' } } : {},
+    })
+    await tiny.ctx.browser.attach(tiny.owner, BrowserTabId('1'))
+    expect((await tiny.call('browser_evaluate', { tabId: '1', expression: '"abcdef"' })).value)
+      .toMatchObject({ truncated: true })
+    expect(e0).toBeDefined()
+    expect(fillRef).toBeDefined()
+  })
+
   it('selects, waits, evaluates, and handles dialogs and uploads', async () => {
     const { call, owner, ctx } = await mount({
-      cdp: (method) => {
-        if (method === 'Runtime.evaluate') return { result: { value: true } }
-        if (method === 'Accessibility.getFullAXTree') return axTree()
+      cdp: (method, params) => {
+        if (method === 'Runtime.evaluate') {
+          const expression = typeof params?.expression === 'string' ? params.expression : ''
+          if (expression.includes('innerText')) return { result: { value: 'Home page' } }
+          if (expression.includes('location.href')) return { result: { value: { url: 'https://example.com/home', title: 'Home' } } }
+          if (expression === 'bad()') return { exceptionDetails: { exception: { description: 'boom' } } }
+          return { result: { value: true } }
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          return {
+            nodes: axTree().nodes.map(node => node.nodeId === '2'
+              ? { ...node, properties: [{ name: 'selected', value: { value: true } }] }
+              : node),
+          }
+        }
         return {}
       },
     })
     await ctx.browser.attach(owner, BrowserTabId('1'))
     expect((await call('browser_select_option', { tabId: '1', ref: '1-e1', value: 'A' })).isError).toBe(true)
-    await call('browser_snapshot', { tabId: '1' })
-    expect((await call('browser_select_option', { tabId: '1', ref: '1-e1', value: 'A' })).isError).toBe(false)
-    expect((await call('browser_wait_for', { tabId: '1', text: 'Home' })).isError).toBe(false)
-    expect((await call('browser_wait_for', { tabId: '1', expression: 'true' })).isError).toBe(false)
+    const first = await call('browser_snapshot', { tabId: '1' })
+    const observationId = (first.value as { observationId: string }).observationId
+    const waitRef = /\[(\d+-e1)\]/.exec(textOf(first))?.[1]
+    expect((await call('browser_snapshot', { tabId: '1', observationId, query: 'button', offset: 0, limit: 10 })).value)
+      .toMatchObject({ observationId })
+    expect((await call('browser_select_option', { tabId: '1', ref: waitRef, value: 'A' })).isError).toBe(false)
+    expect((await call('browser_snapshot', { tabId: '1', maxDepth: 0 })).isError).toBe(false)
+    const matched = await call('browser_wait_for', { tabId: '1', text: 'Home' })
+    expect(matched.value).toMatchObject({ matched: true, timedOut: false })
+    expect(textOf(matched)).toContain('Wait condition matched.')
+    const missed = await call('browser_wait_for', { tabId: '1', text: 'absent', timeoutMs: 1 })
+    expect(textOf(missed)).toContain('Wait condition did not match.')
+    expect(textOf(missed)).toContain('Wait timed out.')
+    expect((await call('browser_wait_for', { tabId: '1', text: 'Missing', gone: true })).value).toMatchObject({ matched: true })
+    expect((await call('browser_wait_for', { tabId: '1', url: 'example.com' })).value).toMatchObject({ matched: true })
+    const stateSnap = await call('browser_snapshot', { tabId: '1' })
+    const stateRoot = /\[(\d+-e0)\]/.exec(textOf(stateSnap))?.[1]
+    expect((await call('browser_wait_for', { tabId: '1', ref: stateRoot, state: 'enabled', timeoutMs: 150 })).value)
+      .toMatchObject({ matched: false, timedOut: true })
+    const selectedSnap = await call('browser_snapshot', { tabId: '1' })
+    const selectedRef = /\[(\d+-e1)\]/.exec(textOf(selectedSnap))?.[1]
+    expect((await call('browser_wait_for', { tabId: '1', ref: selectedRef, state: 'selected' })).value).toMatchObject({ matched: true })
+    expect((await call('browser_wait_for', { tabId: '1', expression: 'true' })).value).toMatchObject({ matched: true })
+    expect((await call('browser_wait_for', { tabId: '1', expression: 'bad()' })).isError).toBe(true)
     const waitMissing = await call('browser_wait_for', { tabId: '1' })
     expect(waitMissing.isError).toBe(true)
     const evaluated = await call('browser_evaluate', { tabId: '1', expression: '1+1' })
-    expect(evaluated.value).toEqual({ tabId: '1', value: true })
+    expect(evaluated.value).toEqual({ tabId: '1', value: true, truncated: false })
     const emptyEval = await ctx.tools.execute({
       signal,
       callId: ToolCallId('eval-empty'),
@@ -698,8 +948,9 @@ describe('tool-browser plugin', () => {
     })
     expect(emptyEval.isError).toBe(false)
     expect((await call('browser_handle_dialog', { tabId: '1', accept: true, promptText: 'ok' })).isError).toBe(false)
-    await call('browser_snapshot', { tabId: '1' })
-    expect((await call('browser_upload', { tabId: '1', ref: '4-e1', paths: ['/tmp/a'] })).isError).toBe(false)
+    const uploadSnap = await call('browser_snapshot', { tabId: '1' })
+    const uploadRef = /\[(\d+-e1)\]/.exec(textOf(uploadSnap))?.[1]
+    expect((await call('browser_upload', { tabId: '1', ref: uploadRef!, paths: ['/tmp/a'] })).isError).toBe(false)
   })
 
   it('surfaces evaluate exceptions and missing agents', async () => {
@@ -738,7 +989,7 @@ describe('tool-browser plugin', () => {
       arguments: { tabId: '1', expression: 'void 0' },
       agent: owner3,
     })
-    expect(nil.value).toEqual({ tabId: '1', value: null })
+    expect(nil.value).toEqual({ tabId: '1', value: null, truncated: false })
     const noAgent = await ctx.tools.execute({
       signal,
       callId: ToolCallId('no-agent'),
@@ -758,8 +1009,7 @@ describe('tool-browser plugin', () => {
   it('reads console messages and Chrome-API facets', async () => {
     const { call, owner, ctx, provider } = await mount()
     await ctx.browser.attach(owner, BrowserTabId('1'))
-    const pending = call('browser_console', { tabId: '1' })
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await call('browser_console', { tabId: '1' })
     provider.emit({
       tabId: BrowserTabId('1'),
       method: 'Runtime.consoleAPICalled',
@@ -785,7 +1035,7 @@ describe('tool-browser plugin', () => {
       method: 'Log.entryAdded',
       params: {},
     })
-    const consoleResult = await pending
+    const consoleResult = await call('browser_console', { tabId: '1' })
     expect(consoleResult.isError).toBe(false)
     expect(consoleResult.value).toEqual({
       messages: [
@@ -981,7 +1231,7 @@ describe('tool-browser plugin', () => {
           }
         }
         if (method === 'Page.captureScreenshot') return {}
-        if (method === 'DOM.getBoxModel') return { model: { content: [1, 2] } }
+        if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
         return {}
       },
     })
@@ -1001,6 +1251,7 @@ describe('tool-browser plugin', () => {
       browser_screenshot: { tabId: '1' },
       browser_click: { tabId: '1', x: 1, y: 2 },
       browser_type: { tabId: '1', text: 'hi' },
+      browser_fill: { tabId: '1', text: 'hi' },
       browser_press_key: { tabId: '1', key: 'Enter' },
       browser_scroll: { tabId: '1' },
       browser_drag: { tabId: '1', fromX: 1, fromY: 1, toX: 2, toY: 2 },
@@ -1064,11 +1315,15 @@ describe('tool-browser plugin', () => {
     })
     expect((await call('browser_screenshot', { tabId: '1' })).value).toMatchObject({ truncated: false })
     expect((await call('browser_click', { tabId: '1', ref: '1-e1' })).isError).toBe(true)
-    await call('browser_snapshot', { tabId: '1' })
-    expect((await call('browser_click', { tabId: '1', ref: '1-e1' })).isError).toBe(true)
-    expect((await call('browser_type', { tabId: '1', text: 'z', ref: '1-e1' })).isError).toBe(false)
+    const firstSnap = await call('browser_snapshot', { tabId: '1' })
+    const firstE1 = /\[(\d+-e1)\]/.exec(textOf(firstSnap))?.[1]
+    expect((await call('browser_click', { tabId: '1', ref: firstE1 })).isError).toBe(false)
+    const afterClick = await call('browser_snapshot', { tabId: '1' })
+    const typeRef = /\[(\d+-e1)\]/.exec(textOf(afterClick))?.[1]
+    expect((await call('browser_type', { tabId: '1', text: 'z', ref: typeRef })).isError).toBe(false)
     expect((await call('browser_scroll', { tabId: '1' })).isError).toBe(false)
-    expect((await call('browser_wait_for', { tabId: '1', text: 'Nope', timeoutMs: 1 })).isError).toBe(false)
+    expect((await call('browser_wait_for', { tabId: '1', text: 'Nope', timeoutMs: 1 })).value)
+      .toMatchObject({ matched: false, timedOut: true })
     expect((await call('browser_hover', { tabId: '1' })).isError).toBe(true)
     expect((await call('browser_hover', { tabId: '1', ref: 'nope' })).isError).toBe(true)
     expect((await call('browser_hover', { tabId: '1', ref: '1-e1' })).isError).toBe(true)
@@ -1096,14 +1351,17 @@ describe('tool-browser plugin', () => {
     const laterE0 = /\[(\d+-e0)\]/.exec(textOf(laterSnap))?.[1]
     expect(laterE1).toBeDefined()
     expect(laterE0).toBeDefined()
-    expect((await call('browser_type', { tabId: '1', text: 'root', ref: laterE0! })).isError).toBe(false)
+    expect((await call('browser_type', { tabId: '1', text: 'root', ref: laterE1! })).isError).toBe(false)
     const afterType = await call('browser_snapshot', { tabId: '1' })
     const afterTypeE1 = /\[(\d+-e1)\]/.exec(textOf(afterType))?.[1]
     expect((await call('browser_select_option', { tabId: '1', ref: afterTypeE1!, value: 'A' })).isError).toBe(false)
     const afterSelect = await call('browser_snapshot', { tabId: '1' })
     const afterSelectE0 = /\[(\d+-e0)\]/.exec(textOf(afterSelect))?.[1]
-    expect((await call('browser_select_option', { tabId: '1', ref: afterSelectE0!, value: 'A' })).isError).toBe(false)
+    const afterSelectE1 = /\[(\d+-e1)\]/.exec(textOf(afterSelect))?.[1]
+    expect((await call('browser_select_option', { tabId: '1', ref: afterSelectE0!, value: 'A' })).isError).toBe(true)
     expect((await call('browser_upload', { tabId: '1', ref: afterSelectE0!, paths: ['/tmp/a'] })).isError).toBe(true)
+    expect((await call('browser_scroll', { tabId: '1', ref: afterSelectE0 })).isError).toBe(true)
+    expect((await call('browser_scroll', { tabId: '1', ref: afterSelectE1 })).isError).toBe(false)
     ctx.tools.get('browser_bookmarks')?.output.render({}, { items: [] })
     ctx.tools.get('browser_reading_list')?.output.render({}, { items: [] })
     ctx.tools.get('browser_history_search')?.output.render({ query: 'q' }, { items: [] })
@@ -1138,7 +1396,7 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_drag', { tabId: '1', fromX: 1, fromY: 1, toX: 8, toY: 9 })).isError).toBe(false)
     expect(request).toHaveBeenCalled()
     expect((await call('browser_cdp', { tabId: '1', method: 'Page.enable', params: { a: 1 } })).isError).toBe(false)
-    expect((await call('browser_wait_for', { tabId: '1', expression: '0', timeoutMs: 1 })).isError).toBe(false)
+    expect((await call('browser_wait_for', { tabId: '1', expression: '0', timeoutMs: 150 })).isError).toBe(false)
     expect((await call('browser_bookmarks', { title: 'N', url: 'https://n.example' })).isError).toBe(false)
     expect((await call('browser_bookmarks', {})).isError).toBe(false)
     expect((await call('browser_reading_list', {})).isError).toBe(false)
@@ -1177,6 +1435,16 @@ describe('tool-browser plugin', () => {
       },
     })
     await ctx.browser.attach(owner, BrowserTabId('1'))
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextCreated',
+      params: { context: { id: 7, auxData: { frameId: 'child' } } },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextCreated',
+      params: { context: { auxData: { frameId: 'child' } } },
+    })
     const frames = await call('browser_frames', { tabId: '1' })
     expect(frames.value).toMatchObject({
       frames: [
@@ -1185,13 +1453,27 @@ describe('tool-browser plugin', () => {
       ],
     })
     expect(textOf(frames)).toContain('(main)')
+    const evaluated = await call('browser_evaluate', { tabId: '1', expression: '1', frameId: 'child' })
+    expect(evaluated.isError).toBe(false)
+    expect(sent.some(item => item.method === 'Runtime.evaluate' && item.params?.contextId === 7)).toBe(true)
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextDestroyed',
+      params: { executionContextId: 7 },
+    })
+    provider.emit({
+      tabId: BrowserTabId('1'),
+      method: 'Runtime.executionContextDestroyed',
+      params: {},
+    })
     const snap = await call('browser_snapshot', { tabId: '1', frameId: 'child' })
     expect(snap.isError).toBe(false)
     expect(sent.some(item => item.method === 'Accessibility.getFullAXTree' && item.params?.frameId === 'child')).toBe(true)
     const missing = await call('browser_snapshot', { tabId: '1', frameId: 'gone' })
     expect(missing.isError).toBe(true)
-    await call('browser_snapshot', { tabId: '1' })
-    const dragged = await call('browser_drag', { tabId: '1', fromRef: '1-e1', toX: 4, toY: 5 })
+    const mainSnap = await call('browser_snapshot', { tabId: '1' })
+    const fromRef = /\[(\d+-e1)\]/.exec(textOf(mainSnap))?.[1]
+    const dragged = await call('browser_drag', { tabId: '1', fromRef, toX: 4, toY: 5 })
     expect(dragged.isError).toBe(false)
     expect((await call('browser_drag', { tabId: '1', fromX: 1, fromY: 1, toX: 8, toY: 9 })).isError).toBe(false)
     provider.emit({
@@ -1202,6 +1484,10 @@ describe('tool-browser plugin', () => {
     })
     const childSnap = await call('browser_snapshot', { tabId: '1', frameId: 'child' })
     expect(childSnap.isError).toBe(false)
+    const childRef = /\[(\d+-e1)\]/.exec(textOf(childSnap))?.[1]
+    expect((await call('browser_wait_for', {
+      tabId: '1', ref: childRef, state: 'enabled', frameId: 'child', timeoutMs: 150,
+    })).value).toMatchObject({ timedOut: true })
     expect(sent.some(item => item.method === 'Accessibility.getFullAXTree' && item.params?.frameId === undefined)).toBe(true)
     provider.emit({
       tabId: BrowserTabId('1'),
@@ -1381,8 +1667,8 @@ describe('tool-browser plugin', () => {
     expect((await call('browser_upload', { tabId: '1', ref: e0!, paths: ['/tmp/a'] })).isError).toBe(true)
     expect((await call('browser_hover', { tabId: '1', ref: e0, x: 1, y: 1 })).isError).toBe(false)
     const afterHover = await call('browser_snapshot', { tabId: '1' })
-    const typedE0 = /\[(\d+-e0)\]/.exec(textOf(afterHover))?.[1]
-    expect((await call('browser_type', { tabId: '1', ref: typedE0, text: 'x' })).isError).toBe(false)
+    const typedButton = /\[(\d+-e1)\]/.exec(textOf(afterHover))?.[1]
+    expect((await call('browser_type', { tabId: '1', ref: typedButton, text: 'x' })).isError).toBe(false)
     const afterType = await call('browser_snapshot', { tabId: '1' })
     const typedE1 = /\[(\d+-e1)\]/.exec(textOf(afterType))?.[1]
     expect((await call('browser_drag', { tabId: '1' })).isError).toBe(true)

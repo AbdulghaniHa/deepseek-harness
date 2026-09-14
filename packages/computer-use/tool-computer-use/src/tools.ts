@@ -7,9 +7,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
+  ComputerDisplayId,
   ComputerError,
   ComputerWindowId,
   type ComputerApp,
+  type ComputerKeyAction,
   type ComputerRect,
   type ComputerWindow,
 } from '@deepseek-ai/dsh-computer-use'
@@ -17,8 +19,9 @@ import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { approveComputerAction, ensureAppGrant, type ComputerApprovalMode, type ComputerApprover } from './approval.ts'
 import { computerMetaFromValue, formatComputerSnapshot, presentComputerCall, presentComputerResult } from './present.ts'
-import { assertImageCapableRoute } from './route.ts'
-import { buildComputerSnapshot, resolveRef, type ComputerToolSnapshot } from './snapshot.ts'
+import { createSerialQueue } from './queue.ts'
+import { assertImageCapableRoute, isImageCapableRoute } from './route.ts'
+import { buildComputerSnapshot, resolveRef, viewComputerSnapshot, type ComputerToolSnapshot } from './snapshot.ts'
 
 /** Resolved tool-computer-use config used while registering tools. */
 export interface ToolComputerUseOptions {
@@ -50,12 +53,14 @@ interface Observation {
   readonly title: string
   readonly windowBounds: ComputerRect
   readonly snapshot: ComputerToolSnapshot
-  screenshot?: {
-    readonly bounds: ComputerRect
-    readonly width: number
-    readonly height: number
-    readonly scale: number
-  }
+  screenshot?: StoredScreenshot
+}
+
+interface StoredScreenshot {
+  readonly bounds: ComputerRect
+  readonly width: number
+  readonly height: number
+  readonly scale: number
 }
 
 /** Tool result for a window whose observation succeeded. */
@@ -79,13 +84,8 @@ interface SnapshotFailure {
 }
 
 interface WindowState {
-  epoch: number
   snapshot: ComputerToolSnapshot | undefined
-  screenshot: {
-    readonly bounds: ComputerRect
-    readonly width: number
-    readonly height: number
-  } | undefined
+  screenshot: StoredScreenshot | undefined
   observation: Observation | undefined
 }
 
@@ -94,30 +94,43 @@ interface WindowState {
  * @param ctx - host context with tools + computer.
  * @param options - resolved config.
  */
+/* jscpd:ignore-start -- each computer_* tool repeats the same grant, queue, and presenter wiring. */
 export function registerComputerTools(ctx: Context, options: ToolComputerUseOptions): void {
   const states = new Map<string, WindowState>()
   const approval = ctx.get('approval') as ComputerApprover | undefined
   const userQuestions = ctx.get('userQuestions')
+  const input = createSerialQueue()
+  let nextObservation = 1
 
   const requireOwner = (agent: Agent | undefined): Agent => {
     if (agent === undefined) throw new Error('computer tools require an agent')
     return agent
   }
 
+  const mintObservationId = (): string => {
+    const id = String(nextObservation)
+    nextObservation += 1
+    return id
+  }
+
   const windowState = (windowId: string): WindowState => {
     const existing = states.get(windowId)
     if (existing !== undefined) return existing
-    const created: WindowState = { epoch: 1, snapshot: undefined, screenshot: undefined, observation: undefined }
+    const created: WindowState = { snapshot: undefined, screenshot: undefined, observation: undefined }
     states.set(windowId, created)
     return created
   }
 
-  const bumpEpoch = (windowId: string): WindowState => {
+  const clearObservation = (windowId: string): void => {
     const state = windowState(windowId)
-    state.epoch += 1
     state.snapshot = undefined
     state.observation = undefined
-    return state
+  }
+
+  const ordinaryLeftClick = (button?: string, count?: number, modifiers?: readonly string[]): boolean => {
+    const left = button === undefined || button === 'left'
+    const single = count === undefined || count === 1
+    return left && single && (modifiers === undefined || modifiers.length === 0)
   }
 
   const findWindow = async (windowId: string, signal?: AbortSignal): Promise<ComputerWindow> => {
@@ -159,25 +172,35 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     windowId: string,
     query: string | undefined,
     signal?: AbortSignal,
-    extra: { maxDepth?: number; ref?: string } = {},
+    extra: { maxDepth?: number; ref?: string; observationId?: string } = {},
   ) => {
     const window = await grantWindow(owner, windowId, 'computer_snapshot', undefined, signal)
+    const state = windowState(windowId)
+    if (extra.observationId !== undefined) {
+      if (state.snapshot === undefined || state.observation === undefined || state.observation.id !== extra.observationId) {
+        throw new ComputerError(
+          `unknown observation "${extra.observationId}"; take another computer_snapshot`,
+          'COMPUTER_STALE_REF',
+        )
+      }
+      const snapshot = viewComputerSnapshot(state.snapshot, query)
+      return { window, snapshot, observation: state.observation }
+    }
     let rootHandle: string | undefined
     if (extra.ref !== undefined) {
-      const current = windowState(windowId).snapshot
-      if (current === undefined) throw new ComputerError('no snapshot is loaded for this window; call computer_snapshot first', 'COMPUTER_STALE_REF')
-      rootHandle = resolveRef(extra.ref, current).handle
+      if (state.snapshot === undefined) throw new ComputerError('no snapshot is loaded for this window; call computer_snapshot first', 'COMPUTER_STALE_REF')
+      rootHandle = resolveRef(extra.ref, state.snapshot).handle
     }
     const raw = await ctx.computer.snapshot(owner, {
       windowId: ComputerWindowId(windowId),
       maxNodes: options.snapshotMaxNodes,
-      ...query !== undefined ? { query } : {},
+      timeoutMs: options.timeoutMs,
       ...extra.maxDepth !== undefined ? { maxDepth: extra.maxDepth } : {},
       ...rootHandle !== undefined ? { rootHandle } : {},
     }, signal)
-    const state = windowState(windowId)
+    const observationId = mintObservationId()
     const snapshot = buildComputerSnapshot(raw, {
-      epoch: state.epoch,
+      observationId,
       maxNodes: options.snapshotMaxNodes,
       ...query !== undefined ? { query } : {},
       ...extra.maxDepth !== undefined ? { maxDepth: extra.maxDepth } : {},
@@ -185,28 +208,35 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     })
     state.snapshot = snapshot
     const observation: Observation = {
-      id: `${windowId}:${state.epoch}`,
+      id: observationId,
       windowId,
       title: window.title,
       windowBounds: window.bounds,
       snapshot,
-      ...state.screenshot !== undefined ? { screenshot: { ...state.screenshot, scale: 1 } } : {},
     }
     state.observation = observation
     return { window, snapshot, observation }
   }
 
+  const emptySnapshot = (observationId: string, window: ComputerWindow): ComputerToolSnapshot => ({
+    observationId,
+    windowId: window.id,
+    appId: window.appId,
+    title: window.title,
+    truncated: false,
+    allNodes: [],
+    nodes: [],
+    text: '',
+  })
+
   const sameRect = (left: ComputerRect, right: ComputerRect): boolean =>
     left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height
 
-  const requireObservation = (windowId: string, observationId: string | undefined): Observation => {
-    const state = windowState(windowId)
-    const observation = observationId === undefined
-      ? state.observation
-      : state.observation?.id === observationId ? state.observation : undefined
-    if (observation === undefined) {
+  const requireObservation = (windowId: string, observationId: string): Observation => {
+    const observation = windowState(windowId).observation
+    if (observation === undefined || observation.id !== observationId) {
       throw new ComputerError(
-        'screenshot-space coordinates require a current computer_observe (or computer_snapshot) for this window',
+        'screenshot-space coordinates require the exact observationId of a current computer_observe or computer_screenshot for this window',
         'COMPUTER_STALE_REF',
       )
     }
@@ -232,10 +262,21 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     signal?: AbortSignal,
   ): Promise<{ x: number; y: number }> => {
     if (space === 'screen') return { x, y }
+    if (observationId === undefined) {
+      throw new ComputerError(
+        'screenshot-space coordinates require the exact observationId of a current capture',
+        'COMPUTER_STALE_REF',
+      )
+    }
     const observation = requireObservation(windowId, observationId)
     await assertGeometry(windowId, observation, signal)
-    const shot = observation.screenshot ?? windowState(windowId).screenshot
-    if (shot === undefined || shot.width === 0 || shot.height === 0) return { x, y }
+    const shot = observation.screenshot
+    if (shot === undefined || shot.width === 0 || shot.height === 0) {
+      throw new ComputerError(
+        `observation "${observationId}" has no screenshot geometry; take computer_observe or computer_screenshot`,
+        'COMPUTER_STALE_REF',
+      )
+    }
     return {
       x: shot.bounds.x + (x / shot.width) * shot.bounds.width,
       y: shot.bounds.y + (y / shot.height) * shot.bounds.height,
@@ -264,7 +305,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     extra: E,
     signal?: AbortSignal,
   ): Promise<(SnapshotValue & E) | (SnapshotFailure & E)> => {
-    bumpEpoch(window.id)
+    clearObservation(window.id)
     const app = await findApp(window.appId, signal)
     try {
       const { snapshot, observation } = await takeSnapshot(owner, window.id, undefined, signal)
@@ -296,6 +337,15 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       /* v8 ignore next -- execute always supplies the AbortSignal from the tools runtime. */
       ...signal !== undefined ? { signal } : {},
     })
+  }
+
+  const fitCapture = (
+    shot: { png: Uint8Array; width: number; height: number; scale: number; bounds: ComputerRect },
+  ): StoredScreenshot & { png: Uint8Array } => {
+    if (shot.png.byteLength > options.screenshotMaxBytes) {
+      throw new Error(`computer_screenshot exceeded screenshotMaxBytes (${options.screenshotMaxBytes})`)
+    }
+    return { png: shot.png, width: shot.width, height: shot.height, scale: shot.scale, bounds: shot.bounds }
   }
 
   ctx.tools.register(defineTool({
@@ -467,7 +517,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       await perAction(owner, 'computer_launch', `launch ${args.app}`, exec.callId, exec.signal)
       const launched = await ctx.computer.launchApp(owner, { name: args.app }, exec.signal)
@@ -489,7 +539,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         app: launched.name,
         windows: windows.map(window => ({ windowId: window.id, title: window.title })),
       }
-    },
+    }),
     presentCall: args => presentComputerCall(`Launch ${args.app}`, 'execute'),
     presentResult: () => presentComputerResult('Launched'),
   }))
@@ -514,26 +564,176 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_focus', exec.callId, exec.signal)
       await perAction(owner, 'computer_focus', `focus ${window.title}`, exec.callId, exec.signal)
       await ctx.computer.focusWindow(owner, ComputerWindowId(args.windowId), exec.signal)
       const app = await findApp(window.appId, exec.signal)
       return { windowId: window.id, app: app.name, windowTitle: window.title }
-    },
+    }),
     presentCall: args => presentComputerCall(`Focus ${args.windowId}`, 'execute'),
     presentResult: () => presentComputerResult('Focused'),
   }))
 
   ctx.tools.register(defineTool({
-    name: 'computer_snapshot',
-    description: 'Read the accessibility tree of a window as an epoch-scoped outline. Primary observation on text-only model routes. maxDepth and a current snapshot ref select a subtree; node states and supported actions are included.',
+    name: 'computer_focus_element',
+    description: 'Focus a snapshot ref in a window, then verify the window is in the foreground.',
     parameters: {
       windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
-      query: { type: 'string', description: 'Optional role or name substring filter.' },
+      ref: { type: 'string', required: true, description: 'Observation-scoped snapshot ref.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          windowId: { type: 'string', required: true },
+          app: { type: 'string', required: true },
+          windowTitle: { type: 'string', required: true },
+          truncated: { type: 'boolean', required: true },
+          text: { type: 'string', required: true },
+          observationId: { type: 'string' },
+          observationError: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.observationError !== undefined
+          ? `Focused element; observation failed: ${value.observationError}`
+          : formatComputerSnapshot(value),
+      }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    execute: async (args, exec) => input.run(async () => {
+      const owner = requireOwner(exec.agent)
+      const window = await grantWindow(owner, args.windowId, 'computer_focus_element', exec.callId, exec.signal)
+      await perAction(owner, 'computer_focus_element', `focus element in ${window.title}`, exec.callId, exec.signal)
+      const snapshot = windowState(args.windowId).snapshot
+      if (snapshot === undefined) throw new ComputerError('no snapshot is loaded for this window; call computer_snapshot first', 'COMPUTER_STALE_REF')
+      const node = resolveRef(args.ref, snapshot)
+      await ctx.computer.focusWindow(owner, ComputerWindowId(args.windowId), exec.signal)
+      await ctx.computer.focusElement(owner, ComputerWindowId(args.windowId), node.handle, exec.signal)
+      return afterAction(owner, window, {}, exec.signal)
+    }),
+    presentCall: args => presentComputerCall(`Focus ${args.ref}`, 'execute'),
+    presentResult: () => presentComputerResult('Focused'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'computer_set_window_bounds',
+    description: 'Move and resize a window in logical screen coordinates.',
+    parameters: {
+      windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
+      x: { type: 'number', required: true },
+      y: { type: 'number', required: true },
+      width: { type: 'number', required: true },
+      height: { type: 'number', required: true },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          windowId: { type: 'string', required: true },
+          app: { type: 'string', required: true },
+          windowTitle: { type: 'string', required: true },
+          bounds: {
+            type: 'object',
+            required: true,
+            additionalProperties: false,
+            properties: {
+              x: { type: 'number', required: true },
+              y: { type: 'number', required: true },
+              width: { type: 'number', required: true },
+              height: { type: 'number', required: true },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: `Moved ${value.windowTitle} to ${value.bounds.x},${value.bounds.y} ${value.bounds.width}x${value.bounds.height}` }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    execute: async (args, exec) => input.run(async () => {
+      const owner = requireOwner(exec.agent)
+      const window = await grantWindow(owner, args.windowId, 'computer_set_window_bounds', exec.callId, exec.signal)
+      await perAction(owner, 'computer_set_window_bounds', `move ${window.title}`, exec.callId, exec.signal)
+      const bounds = { x: args.x, y: args.y, width: args.width, height: args.height }
+      await ctx.computer.setWindowBounds(owner, ComputerWindowId(args.windowId), bounds, exec.signal)
+      clearObservation(args.windowId)
+      const app = await findApp(window.appId, exec.signal)
+      return { windowId: window.id, app: app.name, windowTitle: window.title, bounds }
+    }),
+    presentCall: args => presentComputerCall(`Bounds ${args.windowId}`, 'execute'),
+    presentResult: () => presentComputerResult('Moved'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'computer_displays',
+    description: 'List attached displays with branded ids, logical bounds, scale, and which one is primary.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          displays: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                x: { type: 'number', required: true },
+                y: { type: 'number', required: true },
+                width: { type: 'number', required: true },
+                height: { type: 'number', required: true },
+                scale: { type: 'number', required: true },
+                primary: { type: 'boolean', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.displays.map(display =>
+          `${display.primary ? '* ' : '  '}${display.id} ${display.width}x${display.height} @${display.scale} (${display.x},${display.y})`).join('\n') || '(no displays)',
+      }],
+      presentationMeta: commonMeta,
+    },
+    timeoutMs: options.timeoutMs,
+    isConcurrencySafe: () => true,
+    execute: async (_args, exec) => {
+      const displays = await ctx.computer.listDisplays(exec.signal)
+      return {
+        displays: displays.map(display => ({
+          id: display.id,
+          x: display.bounds.x,
+          y: display.bounds.y,
+          width: display.bounds.width,
+          height: display.bounds.height,
+          scale: display.scale,
+          primary: display.primary,
+        })),
+      }
+    },
+    presentCall: () => presentComputerCall('Displays', 'fetch'),
+    presentResult: () => presentComputerResult('Displays'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'computer_snapshot',
+    description: 'Read the accessibility tree of a window as an observation-scoped outline. Primary observation on text-only model routes. Filtering an existing observationId keeps the same refs; omitting it takes a fresh capture.',
+    parameters: {
+      windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
+      query: { type: 'string', description: 'Optional role or name substring filter. Preserves refs when observationId is reused.' },
       maxDepth: { type: 'number', description: 'Include nodes through this depth (root is 0). Output caps do not bound native full-tree traversal.' },
       ref: { type: 'string', description: 'Optional current snapshot ref whose node becomes the subtree root.' },
+      observationId: { type: 'string', description: 'Reuse this capture instead of taking a fresh snapshot.' },
     },
     output: {
       schema: {
@@ -550,21 +750,22 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       },
       render: (_args, value) => [{
         type: 'text',
-        text: formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+        text: formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
     isConcurrencySafe: () => true,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const { window, snapshot, observation } = await takeSnapshot(owner, args.windowId, args.query, exec.signal, {
         ...args.maxDepth !== undefined ? { maxDepth: args.maxDepth } : {},
         ...args.ref !== undefined ? { ref: args.ref } : {},
+        ...args.observationId !== undefined ? { observationId: args.observationId } : {},
       })
       const app = await findApp(window.appId, exec.signal)
       return snapshotValue(window, app, snapshot, observation)
-    },
+    }),
     presentCall: args => presentComputerCall(`Snapshot ${args.windowId}`, 'fetch'),
     presentResult: () => presentComputerResult('Snapshot'),
   }))
@@ -574,6 +775,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     description: 'Capture a window or display as an image attachment. Requires an image-capable model route; prefer computer_snapshot on text-only routes.',
     parameters: {
       windowId: { type: 'string', description: 'Window to capture; omit for the full display.' },
+      displayId: { type: 'string', description: 'Display id from computer_displays; omit for the primary display.' },
       region: {
         type: 'object',
         description: 'Optional crop in logical screen coordinates (Anthropic zoom).',
@@ -604,7 +806,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         },
       },
       render: (_args, value) => [
-        { type: 'text', text: `Screenshot ${value.width}x${value.height} px, scale ${value.scale}` },
+        { type: 'text', text: `Screenshot ${value.width}x${value.height} px, scale ${value.scale}${value.observationId !== undefined ? `\nObservation: ${value.observationId}` : ''}` },
         {
           type: 'image',
           attachment: {
@@ -619,7 +821,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       if (!options.allowScreenCapture) {
         throw new Error('computer_screenshot is disabled by allowScreenCapture: false; use computer_snapshot')
       }
@@ -634,18 +836,22 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       }
       const shot = await ctx.computer.screenshot(owner, {
         ...args.windowId !== undefined ? { windowId: ComputerWindowId(args.windowId) } : {},
+        ...args.displayId !== undefined ? { displayId: ComputerDisplayId(args.displayId) } : {},
         ...args.region !== undefined ? { region: args.region } : {},
       }, exec.signal)
-      if (shot.png.byteLength > options.screenshotMaxBytes) {
-        throw new Error(`computer_screenshot exceeded screenshotMaxBytes (${options.screenshotMaxBytes})`)
+      const fitted = fitCapture(shot)
+      const saved = await attachments.saveImage({ data: fitted.png, mediaType: 'image/png', name: 'computer-screenshot.png' })
+      const captured: StoredScreenshot = {
+        bounds: fitted.bounds,
+        width: saved.width,
+        height: saved.height,
+        scale: deliveredScale(fitted.bounds, saved.width),
       }
-      const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-screenshot.png' })
-      const scale = deliveredScale(shot.bounds, saved.width)
       if (args.windowId === undefined) {
         return {
           width: saved.width,
           height: saved.height,
-          scale,
+          scale: captured.scale,
           attachmentId: saved.attachmentId,
           mediaType: saved.mediaType,
           bytes: saved.bytes,
@@ -653,44 +859,30 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       }
       const window = await findWindow(args.windowId, exec.signal)
       const state = windowState(args.windowId)
-      // Screenshot-space coordinates are mapped through the stored image's own
-      // pixel dimensions, which are also the dimensions reported to the model.
-      const captured = { bounds: shot.bounds, width: saved.width, height: saved.height, scale }
-      state.screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
-      if (state.observation === undefined) {
-        state.observation = {
-          id: `${args.windowId}:${state.epoch}:shot`,
-          windowId: args.windowId,
-          title: window.title,
-          windowBounds: window.bounds,
-          snapshot: state.snapshot ?? {
-            epoch: state.epoch,
-            windowId: args.windowId,
-            appId: window.appId,
-            title: window.title,
-            truncated: false,
-            nodes: [],
-            text: '',
-          },
-          screenshot: captured,
-        }
-      } else {
-        state.observation.screenshot = captured
+      const observationId = mintObservationId()
+      state.screenshot = captured
+      state.observation = {
+        id: observationId,
+        windowId: args.windowId,
+        title: window.title,
+        windowBounds: window.bounds,
+        snapshot: state.snapshot ?? emptySnapshot(observationId, window),
+        screenshot: captured,
       }
       const app = await findApp(window.appId, exec.signal)
       return {
         windowId: window.id,
         windowTitle: window.title,
         app: app.name,
-        observationId: state.observation.id,
+        observationId,
         width: saved.width,
         height: saved.height,
-        scale,
+        scale: captured.scale,
         attachmentId: saved.attachmentId,
         mediaType: saved.mediaType,
         bytes: saved.bytes,
       }
-    },
+    }),
     presentCall: () => presentComputerCall('Screenshot', 'fetch'),
     presentResult: () => presentComputerResult('Screenshot'),
   }))
@@ -741,7 +933,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         return [
           {
             type: 'text',
-            text: formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+            text: formatComputerSnapshot(value),
           },
           ...captured
             ? [{
@@ -760,14 +952,14 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const { window, snapshot, observation } = await takeSnapshot(owner, args.windowId, args.query, exec.signal, {
         ...args.maxDepth !== undefined ? { maxDepth: args.maxDepth } : {},
         ...args.ref !== undefined ? { ref: args.ref } : {},
       })
       const app = await findApp(window.appId, exec.signal)
-      const wantShot = args.screenshot !== false && options.allowScreenCapture
+      const wantShot = args.screenshot !== false && options.allowScreenCapture && await isImageCapableRoute(ctx, exec)
       let image: {
         width: number
         height: number
@@ -779,35 +971,31 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       } | undefined
       if (wantShot) {
         try {
-          await assertImageCapableRoute(ctx, exec)
           const attachments = ctx.get('attachments')
           if (attachments !== undefined) {
             const shot = await ctx.computer.screenshot(owner, { windowId: ComputerWindowId(args.windowId) }, exec.signal)
-            if (shot.png.byteLength <= options.screenshotMaxBytes) {
-              const saved = await attachments.saveImage({ data: shot.png, mediaType: 'image/png', name: 'computer-observe.png' })
-              // Same coordinate space as computer_screenshot: the stored image's
-              // own pixel dimensions, which are what the result declares.
-              const captured = {
-                bounds: shot.bounds,
-                width: saved.width,
-                height: saved.height,
-                scale: deliveredScale(shot.bounds, saved.width),
-              }
-              windowState(args.windowId).screenshot = { bounds: shot.bounds, width: saved.width, height: saved.height }
-              observation.screenshot = captured
-              image = {
-                width: saved.width,
-                height: saved.height,
-                scale: captured.scale,
-                bounds: shot.bounds,
-                attachmentId: saved.attachmentId,
-                mediaType: saved.mediaType,
-                bytes: saved.bytes,
-              }
+            const fitted = fitCapture(shot)
+            const saved = await attachments.saveImage({ data: fitted.png, mediaType: 'image/png', name: 'computer-observe.png' })
+            const captured: StoredScreenshot = {
+              bounds: fitted.bounds,
+              width: saved.width,
+              height: saved.height,
+              scale: deliveredScale(fitted.bounds, saved.width),
+            }
+            windowState(args.windowId).screenshot = captured
+            observation.screenshot = captured
+            image = {
+              width: saved.width,
+              height: saved.height,
+              scale: captured.scale,
+              bounds: captured.bounds,
+              attachmentId: saved.attachmentId,
+              mediaType: saved.mediaType,
+              bytes: saved.bytes,
             }
           }
         } catch {
-          // Text-only routes and capture failures still return the snapshot.
+          // Capture failures still return the snapshot; the caller does not retry input.
         }
       }
       return {
@@ -826,7 +1014,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
             bounds: window.bounds,
           },
       }
-    },
+    }),
     presentCall: args => presentComputerCall(`Observe ${args.windowId}`, 'fetch'),
     presentResult: () => presentComputerResult('Observe'),
   }))
@@ -836,7 +1024,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
     description: 'Invoke an accessibility action already advertised on a captured node: activate, toggle, select, expandCollapse, or setValue.',
     parameters: {
       windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
-      ref: { type: 'string', required: true, description: 'Epoch-scoped snapshot ref.' },
+      ref: { type: 'string', required: true, description: 'Observation-scoped snapshot ref.' },
       action: { type: 'string', required: true, description: 'activate, toggle, select, expandCollapse, or setValue.' },
       value: { type: 'string', description: 'Replacement value when action is setValue.' },
     },
@@ -858,12 +1046,12 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         type: 'text',
         text: value.observationError !== undefined
           ? `Action completed; observation failed: ${value.observationError}`
-          : formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+          : formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_action', exec.callId, exec.signal)
       await perAction(owner, 'computer_action', `${args.action} in ${window.title}`, exec.callId, exec.signal)
@@ -888,17 +1076,17 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         ...args.value !== undefined ? { value: args.value } : {},
       }, exec.signal)
       return afterAction(owner, window, {}, exec.signal)
-    },
+    }),
     presentCall: args => presentComputerCall(`${args.action} ${args.ref}`, 'execute'),
     presentResult: () => presentComputerResult('Action'),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_click',
-    description: 'Click a snapshot ref or coordinates in a window. Refs prefer an accessibility press when the node supports it. Screenshot-space coordinates bind to observationId.',
+    description: 'Click a snapshot ref or coordinates in a window. An ordinary unmodified single left-click may use accessibility press; other buttons, counts, and modifiers use pointer input. Screenshot-space coordinates require the exact observationId.',
     parameters: {
       windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
-      ref: { type: 'string', description: 'Epoch-scoped snapshot ref.' },
+      ref: { type: 'string', description: 'Observation-scoped snapshot ref.' },
       x: { type: 'number', description: 'X coordinate when not using ref.' },
       y: { type: 'number', description: 'Y coordinate when not using ref.' },
       space: { type: 'string', description: 'screenshot (default) or screen.' },
@@ -925,12 +1113,12 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         type: 'text',
         text: value.observationError !== undefined
           ? `Click completed; observation failed: ${value.observationError}`
-          : formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+          : formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_click', exec.callId, exec.signal)
       await perAction(owner, 'computer_click', `click in ${window.title}`, exec.callId, exec.signal)
@@ -938,7 +1126,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         const snapshot = windowState(args.windowId).snapshot
         if (snapshot === undefined) throw new ComputerError('no snapshot is loaded for this window; call computer_snapshot first', 'COMPUTER_STALE_REF')
         const node = resolveRef(args.ref, snapshot)
-        if (node.supportsPress) {
+        if (node.supportsPress && ordinaryLeftClick(args.button, args.count, args.modifiers)) {
           await ctx.computer.press(owner, ComputerWindowId(args.windowId), node.handle, exec.signal)
         } else {
           const center = {
@@ -969,7 +1157,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         }, exec.signal)
       }
       return afterAction(owner, window, {}, exec.signal)
-    },
+    }),
     presentCall: args => presentComputerCall(`Click ${args.ref ?? `${args.x},${args.y}`}`, 'execute'),
     presentResult: () => presentComputerResult('Clicked'),
   }))
@@ -1002,19 +1190,21 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         type: 'text',
         text: value.observationError !== undefined
           ? `Typed; observation failed: ${value.observationError}`
-          : formatComputerSnapshot({ app: value.app, windowTitle: value.windowTitle, text: value.text, truncated: value.truncated }),
+          : formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_type', exec.callId, exec.signal)
       await perAction(owner, 'computer_type', `type in ${window.title}`, exec.callId, exec.signal)
+      await ctx.computer.focusWindow(owner, ComputerWindowId(args.windowId), exec.signal)
       if (args.ref !== undefined) {
         const snapshot = windowState(args.windowId).snapshot
         if (snapshot === undefined) throw new ComputerError('no snapshot is loaded for this window; call computer_snapshot first', 'COMPUTER_STALE_REF')
         const node = resolveRef(args.ref, snapshot)
+        await ctx.computer.focusElement(owner, ComputerWindowId(args.windowId), node.handle, exec.signal)
         if (node.supportsSetValue) {
           await ctx.computer.setValue(owner, ComputerWindowId(args.windowId), node.handle, args.text, exec.signal)
         } else {
@@ -1027,19 +1217,20 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         await ctx.computer.key(owner, ComputerWindowId(args.windowId), { key: 'Enter' }, exec.signal)
       }
       return afterAction(owner, window, { typed: true }, exec.signal)
-    },
+    }),
     presentCall: () => presentComputerCall('Type', 'execute'),
     presentResult: () => presentComputerResult('Typed'),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_press_key',
-    description: 'Press a key in a window, with optional modifiers and repeat.',
+    description: 'Press a key in a window, or hold/release it. Held keys are released on cancellation, turn completion, disposal, and helper failure.',
     parameters: {
       windowId: { type: 'string', required: true, description: 'Window id from computer_apps.' },
       key: { type: 'string', required: true, description: 'Key name, for example Enter or a.' },
       modifiers: { type: 'array', items: { type: 'string' }, description: 'alt, ctrl, meta, and/or shift.' },
       repeat: { type: 'number', description: 'How many times to press. Defaults to 1.' },
+      action: { type: 'string', description: 'press (default), down, or up.' },
     },
     output: {
       schema: {
@@ -1056,21 +1247,28 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
           key: { type: 'string', required: true },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: `Pressed ${value.key}` }],
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.observationError !== undefined
+          ? `Pressed ${value.key}; observation failed: ${value.observationError}`
+          : formatComputerSnapshot(value),
+      }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_press_key', exec.callId, exec.signal)
       await perAction(owner, 'computer_press_key', `key ${args.key} in ${window.title}`, exec.callId, exec.signal)
+      const action: ComputerKeyAction = args.action === 'down' || args.action === 'up' ? args.action : 'press'
       await ctx.computer.key(owner, ComputerWindowId(args.windowId), {
         key: args.key,
+        action,
         ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {},
         ...args.repeat !== undefined ? { repeat: args.repeat } : {},
       }, exec.signal)
       return afterAction(owner, window, { key: args.key }, exec.signal)
-    },
+    }),
     presentCall: args => presentComputerCall(`Key ${args.key}`, 'execute'),
     presentResult: () => presentComputerResult('Key'),
   }))
@@ -1108,12 +1306,12 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         type: 'text',
         text: value.observationError !== undefined
           ? `Scrolled; observation failed: ${value.observationError}`
-          : 'Scrolled',
+          : formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_scroll', exec.callId, exec.signal)
       await perAction(owner, 'computer_scroll', `scroll in ${window.title}`, exec.callId, exec.signal)
@@ -1140,7 +1338,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {},
       }, exec.signal)
       return afterAction(owner, window, { scrolled: true }, exec.signal)
-    },
+    }),
     presentCall: () => presentComputerCall('Scroll', 'execute'),
     presentResult: () => presentComputerResult('Scrolled'),
   }))
@@ -1193,12 +1391,12 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         type: 'text',
         text: value.observationError !== undefined
           ? `Dragged; observation failed: ${value.observationError}`
-          : 'Dragged',
+          : formatComputerSnapshot(value),
       }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_drag', exec.callId, exec.signal)
       await perAction(owner, 'computer_drag', `drag in ${window.title}`, exec.callId, exec.signal)
@@ -1228,7 +1426,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         ...args.modifiers !== undefined ? { modifiers: args.modifiers } : {},
       }, exec.signal)
       return afterAction(owner, window, { dragged: true }, exec.signal)
-    },
+    }),
     presentCall: () => presentComputerCall('Drag', 'execute'),
     presentResult: () => presentComputerResult('Dragged'),
   }))
@@ -1253,7 +1451,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const window = await grantWindow(owner, args.windowId, 'computer_mouse_move', exec.callId, exec.signal)
       await perAction(owner, 'computer_mouse_move', `move in ${window.title}`, exec.callId, exec.signal)
@@ -1264,7 +1462,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       )
       await ctx.computer.move(owner, ComputerWindowId(args.windowId), point, exec.signal)
       return { windowId: args.windowId, x: point.x, y: point.y }
-    },
+    }),
     presentCall: () => presentComputerCall('Move pointer', 'execute'),
     presentResult: () => presentComputerResult('Moved'),
   }))
@@ -1291,13 +1489,14 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
           windowTitle: { type: 'string', required: true },
           text: { type: 'string', required: true },
           observationId: { type: 'string' },
+          timedOut: { type: 'boolean', required: true },
         },
       },
       render: (_args, value) => [{ type: 'text', text: value.matched ? `Matched in ${value.windowTitle}` : `Timed out waiting in ${value.windowTitle}` }],
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       const deadline = Date.now() + (args.timeoutMs ?? options.timeoutMs)
       let lastTitle = ''
@@ -1313,6 +1512,7 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         ? args.state
         : undefined
       while (Date.now() <= deadline) {
+        exec.signal.throwIfAborted()
         const query = args.gone === true ? undefined : args.text
         const { window, snapshot, observation } = await takeSnapshot(owner, args.windowId, query, exec.signal)
         lastTitle = window.title
@@ -1326,13 +1526,14 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
         const titleOk = args.title === undefined || window.title.includes(args.title)
         let stateOk = wantedState === undefined
         if (wantedState !== undefined) {
-          const node = handle === undefined ? undefined : snapshot.nodes.find(item => item.handle === handle)
+          const node = handle === undefined ? undefined : snapshot.allNodes.find(item => item.handle === handle)
           stateOk = node !== undefined && node.states.includes(wantedState)
         }
         if (textOk && titleOk && stateOk) {
           return {
             windowId: args.windowId,
             matched: true,
+            timedOut: false,
             windowTitle: window.title,
             text: snapshot.text,
             observationId: observation.id,
@@ -1343,11 +1544,12 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       return {
         windowId: args.windowId,
         matched: false,
+        timedOut: true,
         windowTitle: lastTitle,
         text: lastText,
         ...lastObservationId !== undefined ? { observationId: lastObservationId } : {},
       }
-    },
+    }),
     presentCall: () => presentComputerCall('Wait', 'fetch'),
     presentResult: () => presentComputerResult('Wait'),
   }))
@@ -1372,18 +1574,44 @@ export function registerComputerTools(ctx: Context, options: ToolComputerUseOpti
       presentationMeta: commonMeta,
     },
     timeoutMs: options.timeoutMs,
-    execute: async (args, exec) => {
+    execute: async (args, exec) => input.run(async () => {
       const owner = requireOwner(exec.agent)
       if (args.action === 'write') {
         if (args.text === undefined) throw new Error('computer_clipboard write requires text')
         await perAction(owner, 'computer_clipboard', 'write clipboard', exec.callId, exec.signal)
+        if (ctx.computer.listGrants(owner).length === 0) {
+          const windows = await ctx.computer.listWindows(undefined, exec.signal)
+          const focused = windows.find(window => window.focused) ?? windows[0]
+          if (focused !== undefined) {
+            await grantWindow(owner, focused.id, 'computer_clipboard', exec.callId, exec.signal)
+          } else {
+            const apps = await ctx.computer.listApps(exec.signal)
+            const app = apps[0]
+            if (app === undefined) {
+              throw new ComputerError('clipboard write requires a granted application', 'COMPUTER_APP_NOT_ALLOWED')
+            }
+            await ensureAppGrant({
+              computer: ctx.computer,
+              owner,
+              app,
+              mode: options.approval,
+              grantScope: options.grantScope,
+              ...userQuestions !== undefined ? { userQuestions } : {},
+              ...approval !== undefined ? { approval } : {},
+              toolName: 'computer_clipboard',
+              callId: exec.callId,
+              signal: exec.signal,
+            })
+          }
+        }
         await ctx.computer.clipboardWrite(owner, args.text, exec.signal)
         return { action: 'write' }
       }
       const text = await ctx.computer.clipboardRead(exec.signal)
       return { action: 'read', text }
-    },
+    }),
     presentCall: args => presentComputerCall(`Clipboard ${args.action}`, args.action === 'read' ? 'fetch' : 'execute'),
     presentResult: () => presentComputerResult('Clipboard'),
   }))
 }
+/* jscpd:ignore-end */

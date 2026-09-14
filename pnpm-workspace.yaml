@@ -47,6 +47,8 @@ allowBuilds:
   node-addon-require-builtin: false
   # JSONL durability calls MoveFileExW with write-through publication on Windows.
   koffi: true
+  # Physical PNG downscale for computer screenshots before attachment storage.
+  sharp: true
   # The Python runtime deploy includes the reviewed workspace postinstall that
   # restores the executable bit on node-pty's macOS spawn helper.
   '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true

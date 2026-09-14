@@ -58,7 +58,7 @@ describe('dsh-base bundle', () => {
     expect(rows.find(row => row.id === 'computer-use-local')).toBeDefined()
     expect(rows.find(row => row.id === 'tool-computer-use')?.config).toMatchObject({
       enabled: false,
-      approval: 'apps',
+      approval: 'never',
     })
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-computer-use')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-computer-use-local')

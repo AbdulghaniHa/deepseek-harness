@@ -22,13 +22,16 @@ interface ComputerProvider {
   permissions(signal?: AbortSignal): Promise<ComputerPermissions>
   listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>
   listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>
+  listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>
   launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>
   focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>
+  setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal): Promise<void>
   windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>
   snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  focusElement(handle: string, signal?: AbortSignal): Promise<void>
   action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
@@ -49,6 +52,16 @@ interface ComputerWindow {
   readonly title: string
   readonly bounds: ComputerRect
   readonly focused: boolean
+}
+```
+
+```ts type-equiv
+/** One display as the seam presents it to consumers. */
+interface ComputerDisplay {
+  readonly id: ComputerDisplayId
+  readonly bounds: ComputerRect
+  readonly scale: number
+  readonly primary: boolean
 }
 ```
 
@@ -78,11 +91,32 @@ interface ComputerPoint {
 ```
 
 ```ts type-equiv
+/** Axis-aligned rectangle in logical screen coordinates. */
+interface ComputerRect {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+```
+
+```ts type-equiv
 /** Screenshot capture request. */
 interface ComputerScreenshotRequest {
   readonly windowId?: ComputerWindowId
-  readonly displayId?: number
+  readonly displayId?: ComputerDisplayId
   readonly region?: ComputerRect
+}
+```
+
+```ts type-equiv
+/** Synthesized key press, or an isolated down/up. */
+interface ComputerKeyRequest {
+  readonly key: string
+  readonly modifiers?: readonly string[]
+  readonly repeat?: number
+  /** Defaults to a full press (down then up). */
+  readonly action?: ComputerKeyAction
 }
 ```
 
@@ -163,6 +197,13 @@ async listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>
 async listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>
 
 /**
+ * List displays through the selected provider.
+ * @param signal - optional cancellation forwarded to the provider.
+ * @returns the current display list.
+ */
+async listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>
+
+/**
  * Record a grant for `owner` on `appId`. Does not consume a `once` grant.
  * @param owner - exact Agent that received the grant.
  * @param appId - application the grant covers.
@@ -212,6 +253,15 @@ async launchApp(owner: Agent, request: ComputerLaunchRequest, signal?: AbortSign
 async focusWindow(owner: Agent, windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>
 
 /**
+ * Move and resize a granted window.
+ * @param owner - exact Agent that owns the grant.
+ * @param windowId - window to mutate.
+ * @param bounds - destination bounds in logical screen coordinates.
+ * @param signal - optional cancellation forwarded to the provider.
+ */
+async setWindowBounds( owner: Agent, windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal, ): Promise<void>
+
+/**
  * Accessibility snapshot of a granted window.
  * @param owner - exact Agent that owns the grant.
  * @param request - window, node cap, and optional query.
@@ -250,6 +300,15 @@ async press(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: A
 async setValue(owner: Agent, windowId: ComputerWindowId, handle: string, text: string, signal?: AbortSignal): Promise<void>
 
 /**
+ * Focus an accessibility node in a granted window.
+ * @param owner - exact Agent that owns the grant.
+ * @param windowId - window that owns the node.
+ * @param handle - provider node handle.
+ * @param signal - optional cancellation forwarded to the provider.
+ */
+async focusElement(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: AbortSignal): Promise<void>
+
+/**
  * Invoke a named accessibility action on a node in a granted window.
  * @param owner - exact Agent that owns the grant.
  * @param windowId - window that owns the node.
@@ -284,6 +343,14 @@ async type(owner: Agent, windowId: ComputerWindowId, text: string, signal?: Abor
  * @param signal - optional cancellation forwarded to the provider.
  */
 async key(owner: Agent, windowId: ComputerWindowId, request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>
+
+/**
+ * Release every key this owner currently holds. Called on cancellation,
+ * disposal, turn completion, and helper failure.
+ * @param owner - exact Agent whose held keys to release.
+ * @param signal - optional cancellation forwarded to the provider.
+ */
+async releaseHeldKeys(owner: Agent, signal?: AbortSignal): Promise<void>
 
 /**
  * Scroll after deny, grant, and hit-test checks.

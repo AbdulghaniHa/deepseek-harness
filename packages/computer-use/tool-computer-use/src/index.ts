@@ -11,17 +11,20 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-computer-use'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type { ComputerApprovalMode } from './approval.ts'
-import { COMPUTER_PROMPT } from './prompt.ts'
+import { computerPrompt } from './prompt.ts'
 import { registerComputerTools } from './tools.ts'
 
 export { approveComputerAction, ensureAppGrant } from './approval.ts'
 export type { ComputerApprovalMode, ComputerApprover } from './approval.ts'
 export { computerMetaFromValue, formatComputerSnapshot, presentComputerCall, presentComputerResult } from './present.ts'
 export type { ComputerToolMeta } from './present.ts'
-export { COMPUTER_PROMPT } from './prompt.ts'
-export { SNAPSHOT_REF, buildComputerSnapshot, resolveRef } from './snapshot.ts'
+export { COMPUTER_PROMPT, computerPrompt } from './prompt.ts'
+export { SNAPSHOT_REF, buildComputerSnapshot, resolveRef, viewComputerSnapshot } from './snapshot.ts'
 export type { ComputerSnapshotRow, ComputerToolSnapshot } from './snapshot.ts'
-export { assertImageCapableRoute } from './route.ts'
+export { fitPng } from './image.ts'
+export type { FittedPng } from './image.ts'
+export { createSerialQueue } from './queue.ts'
+export { assertImageCapableRoute, isImageCapableRoute } from './route.ts'
 export { registerComputerTools } from './tools.ts'
 export type { ToolComputerUseOptions } from './tools.ts'
 
@@ -79,7 +82,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
-  approval: z.union(['always', 'apps', 'never'] as const).default('apps'),
+  approval: z.union(['always', 'apps', 'never'] as const).default('never'),
   grantScope: z.union(['once', 'session'] as const).default('session'),
   snapshotMaxNodes: z.number().default(DEFAULT_SNAPSHOT_MAX_NODES),
   screenshotMaxBytes: z.number().default(DEFAULT_SCREENSHOT_MAX_BYTES),
@@ -112,7 +115,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.systemPrompt.section({
     name: 'tool:computer',
     order: ctx.systemPrompt.getSectionOrder('TOOL_COMPUTER'),
-    text: COMPUTER_PROMPT,
+    text: computerPrompt(resolved.approval),
   })
   registerComputerTools(ctx, resolved)
 }

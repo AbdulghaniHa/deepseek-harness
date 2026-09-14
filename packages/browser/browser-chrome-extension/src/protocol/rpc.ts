@@ -107,6 +107,7 @@ export function protocolMismatch(request: BrowserRpcRequest): string | undefined
  * @param value - decoded JSON.
  * @returns whether the value is a request.
  */
+/* jscpd:ignore-start -- JSON-RPC request narrowing is identical on the computer helper protocol. */
 export function isRpcRequest(value: unknown): value is BrowserRpcRequest {
   if (typeof value !== 'object' || value === null) return false
   const record = value as Record<string, unknown>
@@ -126,6 +127,7 @@ export function isRpcResponse(value: unknown): value is BrowserRpcResponse {
   const record = value as Record<string, unknown>
   return record.jsonrpc === '2.0' && typeof record.id === 'number' && record.method === undefined
 }
+/* jscpd:ignore-end */
 
 /**
  * Narrow a decoded value to a notification.

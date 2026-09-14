@@ -466,7 +466,7 @@
       name: '@deepseek-ai/dsh-tool-browser'
       config:
         enabled: false
-        approval: user-tabs
+        approval: never
         allowRawCdp: false
 
     # Computer-use seam. Tools stay registered when the helper is down and
@@ -482,7 +482,7 @@
       name: '@deepseek-ai/dsh-tool-computer-use'
       config:
         enabled: false
-        approval: apps
+        approval: never
 
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 

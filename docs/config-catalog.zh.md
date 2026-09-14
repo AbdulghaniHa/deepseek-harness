@@ -572,7 +572,7 @@ export interface ComputerRuntimeConfig {
 }
 ```
 
-来源：[`packages/computer-use/computer-use/src/index.ts:109`](../packages/computer-use/computer-use/src/index.ts)
+来源：[`packages/computer-use/computer-use/src/index.ts:118`](../packages/computer-use/computer-use/src/index.ts)
 
 <a id="deepseek-aidsh-computer-use-local"></a>
 
@@ -597,7 +597,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/computer-use/computer-use-local/src/index.ts:61`](../packages/computer-use/computer-use-local/src/index.ts)
+来源：[`packages/computer-use/computer-use-local/src/index.ts:62`](../packages/computer-use/computer-use-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -2856,6 +2856,12 @@ export interface Config {
   snapshotMaxNodes?: number
   /** Upper bound on an inlined screenshot's decoded byte size. */
   screenshotMaxBytes?: number
+  /** Upper bound on Unicode characters in one snapshot name or value. */
+  snapshotMaxFieldChars?: number
+  /** Upper bound on UTF-8 bytes of page text, evaluate results, and console lines. */
+  textMaxBytes?: number
+  /** Upper bound on console entries retained per tab. */
+  consoleMaxEntries?: number
   /** Cooperative timeout budget (ms) for `browser_evaluate`. */
   evaluateTimeoutMs?: number
   /** Register the raw `browser_cdp` escape hatch. Defaults to false. */
@@ -2872,7 +2878,7 @@ export interface Config {
 export type BrowserApprovalMode = 'always' | 'user-tabs' | 'never'
 ```
 
-来源： [`packages/browser/tool-browser/src/index.ts:64`](../packages/browser/tool-browser/src/index.ts)
+来源： [`packages/browser/tool-browser/src/index.ts:82`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-computer-use"></a>
 

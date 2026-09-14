@@ -16,6 +16,9 @@ export type ComputerAppId = Branded<'ComputerAppId'>
 /** Opaque window identity minted by a provider and fenced by the seam. */
 export type ComputerWindowId = Branded<'ComputerWindowId'>
 
+/** Opaque display identity minted by a provider and fenced by helper lifetime. */
+export type ComputerDisplayId = Branded<'ComputerDisplayId'>
+
 /**
  * Optional desktop facets a provider may advertise. The seam reports the
  * selected provider's set; a missing facet fails at the call, not at load.
@@ -36,9 +39,12 @@ export type ComputerOperation =
   | 'listWindows'
   | 'launchApp'
   | 'focusWindow'
+  | 'listDisplays'
+  | 'setWindowBounds'
   | 'snapshot'
   | 'screenshot'
   | 'action'
+  | 'focusElement'
   | 'click'
   | 'type'
   | 'key'
@@ -47,6 +53,9 @@ export type ComputerOperation =
   | 'move'
   | 'clipboardRead'
   | 'clipboardWrite'
+
+/** Key synthesis: a full press, or an isolated down/up held until released. */
+export type ComputerKeyAction = 'press' | 'down' | 'up'
 
 /**
  * Configured vs live connection for the selected provider.
@@ -122,6 +131,14 @@ export interface ComputerWindow {
   readonly focused: boolean
 }
 
+/** One display as the seam presents it to consumers. */
+export interface ComputerDisplay {
+  readonly id: ComputerDisplayId
+  readonly bounds: ComputerRect
+  readonly scale: number
+  readonly primary: boolean
+}
+
 /** What one backend is asked when launching an application. */
 export interface ComputerLaunchRequest {
   readonly name: string
@@ -139,6 +156,8 @@ export interface ComputerSnapshotRequest {
   readonly maxDepth?: number
   /** Walk this node as the subtree root; omitted walks the window root. */
   readonly rootHandle?: string
+  /** Abort native traversal after this many milliseconds and return a truncated tree. */
+  readonly timeoutMs?: number
 }
 
 /** One accessibility node as a provider returns it (opaque handle, no model ref). */
@@ -168,7 +187,7 @@ export interface ComputerSnapshot {
 /** Screenshot capture request. */
 export interface ComputerScreenshotRequest {
   readonly windowId?: ComputerWindowId
-  readonly displayId?: number
+  readonly displayId?: ComputerDisplayId
   readonly region?: ComputerRect
 }
 
@@ -190,11 +209,13 @@ export interface ComputerClickRequest {
   readonly modifiers?: readonly string[]
 }
 
-/** Synthesized key press. */
+/** Synthesized key press, or an isolated down/up. */
 export interface ComputerKeyRequest {
   readonly key: string
   readonly modifiers?: readonly string[]
   readonly repeat?: number
+  /** Defaults to a full press (down then up). */
+  readonly action?: ComputerKeyAction
 }
 
 /** Synthesized scroll. */
@@ -245,13 +266,16 @@ export interface ComputerProvider {
   permissions(signal?: AbortSignal): Promise<ComputerPermissions>
   listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>
   listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>
+  listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>
   launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>
   focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>
+  setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal): Promise<void>
   windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>
   snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  focusElement(handle: string, signal?: AbortSignal): Promise<void>
   action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
@@ -267,8 +291,9 @@ export interface ComputerProvider {
  * Typed computer-use error with a machine-routable, open-string `code` and chained `cause`.
  * Shared codes cover unavailable, missing, unusable, ambiguous, or duplicate
  * providers, denied OS permissions, the fixed deny list, a missing grant, a
- * coordinate hit-test mismatch, changed window geometry, a vanished or
- * ambiguous window, a stale snapshot ref, a crashed helper, an unsupported
- * accessibility action, and an unsupported platform facet.
+ * coordinate hit-test mismatch, held input belonging to another owner,
+ * changed window geometry, a vanished or ambiguous window, a stale snapshot
+ * ref, a crashed helper, an unsupported accessibility action, and an
+ * unsupported platform facet.
  */
 export class ComputerError extends HarnessError {}

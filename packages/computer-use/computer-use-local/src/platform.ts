@@ -12,14 +12,17 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
   ComputerAppId,
+  ComputerDisplayId,
   ComputerError,
   ComputerWindowId,
   type ComputerApp,
   type ComputerCapability,
   type ComputerClickRequest,
+  type ComputerDisplay,
   type ComputerKeyRequest,
   type ComputerLaunchRequest,
   type ComputerPermissions,
+  type ComputerRect,
   type ComputerScreenshot,
   type ComputerScreenshotRequest,
   type ComputerSnapshot,
@@ -89,8 +92,23 @@ const DEFAULT_IO: PlatformIo = {
 /** Real process I/O used when tests do not inject a runner. */
 export const defaultPlatformIo: PlatformIo = DEFAULT_IO
 
-function unsupported(action: string, platform: NodeJS.Platform): never {
-  throw new ComputerError(`${action} is not supported by the platform backend on ${platform}`, 'COMPUTER_UNSUPPORTED')
+function pointIn(bounds: ComputerRect, x: number, y: number): boolean {
+  return x >= bounds.x && y >= bounds.y && x < bounds.x + bounds.width && y < bounds.y + bounds.height
+}
+
+function parseXdotoolGeometry(stdout: string): ComputerRect {
+  const values = new Map<string, number>()
+  for (const line of stdout.split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    values.set(line.slice(0, eq), Number(line.slice(eq + 1)))
+  }
+  return {
+    x: values.get('X') ?? 0,
+    y: values.get('Y') ?? 0,
+    width: values.get('WIDTH') ?? 0,
+    height: values.get('HEIGHT') ?? 0,
+  }
 }
 
 /**
@@ -98,6 +116,17 @@ function unsupported(action: string, platform: NodeJS.Platform): never {
  * this so a caller awaiting the declared promise sees a rejection rather than
  * a synchronous throw.
  */
+/**
+ * Throw from an async method that has already started work, so the rejection
+ * still matches {@link unsupportedRejection}.
+ */
+function unsupported(action: string, platform: NodeJS.Platform): never {
+  throw new ComputerError(
+    `${action} is not supported by the platform backend on ${platform}`,
+    'COMPUTER_UNSUPPORTED',
+  )
+}
+
 function unsupportedRejection(action: string, platform: NodeJS.Platform): Promise<never> {
   return Promise.reject(new ComputerError(
     `${action} is not supported by the platform backend on ${platform}`,
@@ -173,6 +202,36 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
     },
 
     async listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]> {
+      if (platform === 'linux' && !wayland) {
+        try {
+          const ids = (await io.run(['xdotool', 'search', '--onlyvisible', '--name', '.'], signal))
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => /^\d+$/u.test(line))
+            .slice(0, 50)
+          const windows: ComputerWindow[] = []
+          for (const id of ids) {
+            try {
+              const title = await io.run(['xdotool', 'getwindowname', id], signal)
+              const geometry = parseXdotoolGeometry(await io.run(['xdotool', 'getwindowgeometry', '--shell', id], signal))
+              const pidText = await io.run(['xdotool', 'getwindowpid', id], signal)
+              const pid = Number(pidText)
+              windows.push({
+                id: ComputerWindowId(id),
+                appId: ComputerAppId(`pid:${Number.isInteger(pid) ? pid : id}`),
+                title,
+                bounds: geometry,
+                focused: windows.length === 0,
+              })
+            } catch {
+              // A window can close between search and geometry; skip it.
+            }
+          }
+          return appId === undefined ? windows : windows.filter(window => window.appId === appId)
+        } catch {
+          return []
+        }
+      }
       if (platform !== 'darwin') return []
       const names = appId === undefined
         ? (await this.listApps(signal)).map(item => item.name)
@@ -198,6 +257,15 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       return windows
     },
 
+    listDisplays(): Promise<readonly ComputerDisplay[]> {
+      return Promise.resolve([{
+        id: ComputerDisplayId('d1'),
+        bounds: { x: 0, y: 0, width: 1440, height: 900 },
+        scale: 1,
+        primary: true,
+      }])
+    },
+
     async launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp> {
       if (platform === 'darwin') await io.run(['open', '-a', request.name], signal)
       else if (platform === 'win32') await io.run(['cmd', '/c', 'start', '', request.name], signal)
@@ -212,8 +280,13 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
       await io.run(['osascript', '-e', `tell application ${JSON.stringify(name)} to activate`], signal)
     },
 
-    windowAtPoint(): Promise<ComputerWindow | undefined> {
-      return Promise.resolve(undefined)
+    setWindowBounds(_windowId: ComputerWindowId, _bounds: ComputerRect): Promise<void> {
+      return unsupportedRejection('setWindowBounds', platform)
+    },
+
+    async windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined> {
+      const windows = await this.listWindows(undefined, signal)
+      return windows.find(window => pointIn(window.bounds, x, y))
     },
 
     snapshot(): Promise<ComputerSnapshot> {
@@ -237,6 +310,10 @@ export function createPlatformBackend(options: PlatformBackendOptions = {}): Des
 
     setValue(): Promise<void> {
       return unsupportedRejection('setValue', platform)
+    },
+
+    focusElement(): Promise<void> {
+      return unsupportedRejection('focusElement', platform)
     },
 
     action(): Promise<void> {

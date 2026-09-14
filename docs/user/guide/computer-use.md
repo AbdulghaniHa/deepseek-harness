@@ -27,9 +27,9 @@ Add a profile overlay (`$DSH_HOME/profiles/<name>/cordis.patch.yml`):
   name: '@deepseek-ai/dsh-tool-computer-use'
   config:
     enabled: true
-    approval: apps
+    approval: never
 ```
 
-First use of an app asks **Allow once** / **Allow for this session** / **Deny**. Terminal apps and the harness process itself are always refused.
+Default `approval: never` grants the first app automatically. Set `approval: apps` to ask **Allow once** / **Allow for this session** / **Deny**. Terminal apps and the harness process itself are always refused.
 
 Prefer `computer_snapshot` and refs. Use `computer_screenshot` only when the accessibility tree is insufficient and the current model accepts images.

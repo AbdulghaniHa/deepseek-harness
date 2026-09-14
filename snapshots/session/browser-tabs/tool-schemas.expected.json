@@ -96,6 +96,21 @@
           "y": {
             "type": "number",
             "description": "Viewport y when not using a ref."
+          },
+          "button": {
+            "type": "string",
+            "description": "left, right, or middle. Defaults to left."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Click count. Defaults to 1."
+          },
+          "modifiers": {
+            "type": "array",
+            "description": "alt, ctrl, meta, and/or shift.",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -120,12 +135,24 @@
     },
     {
       "name": "browser_console",
-      "description": "Read recent console messages from an attached tab.",
+      "description": "Read console messages captured from attachment onward. Filter, limit, or clear the per-tab buffer.",
       "parameters": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "string"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Substring matched against level or text, ignoring case."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum entries to return, newest kept."
+          },
+          "clear": {
+            "type": "boolean",
+            "description": "Drop retained messages after reading."
           }
         },
         "required": [
@@ -171,6 +198,13 @@
           },
           "toY": {
             "type": "number"
+          },
+          "modifiers": {
+            "type": "array",
+            "description": "alt, ctrl, meta, and/or shift.",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -180,7 +214,7 @@
     },
     {
       "name": "browser_evaluate",
-      "description": "Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.",
+      "description": "Run a JavaScript expression in the attached tab or selected frame and return a JSON value.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -198,6 +232,33 @@
         "required": [
           "tabId",
           "expression"
+        ]
+      }
+    },
+    {
+      "name": "browser_fill",
+      "description": "Replace the focused field's contents. Use browser_type to insert at the caret.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Optional snapshot ref to focus first."
+          },
+          "submit": {
+            "type": "boolean",
+            "description": "Press Enter after filling."
+          }
+        },
+        "required": [
+          "tabId",
+          "text"
         ]
       }
     },
@@ -369,7 +430,7 @@
     },
     {
       "name": "browser_press_key",
-      "description": "Press a single key with optional modifiers on an attached tab.",
+      "description": "Press a single key with optional named modifiers on an attached tab.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -380,8 +441,11 @@
             "type": "string"
           },
           "modifiers": {
-            "type": "integer",
-            "description": "CDP modifier bitmask."
+            "type": "array",
+            "description": "alt, ctrl, meta, and/or shift.",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -407,7 +471,7 @@
     },
     {
       "name": "browser_screenshot",
-      "description": "Capture a PNG screenshot of an attached tab. Oversized images are summarized instead of inlined.",
+      "description": "Capture a PNG screenshot of an attached tab. Saved as an attachment; image-capable routes receive an image block. Text-only routes still receive dimensions.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -426,12 +490,24 @@
     },
     {
       "name": "browser_scroll",
-      "description": "Scroll the page or a snapshot ref on an attached tab.",
+      "description": "Scroll at a snapshot ref, viewport coordinates, or the viewport center when omitted.",
       "parameters": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "string"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Optional snapshot ref whose center receives the wheel event."
+          },
+          "x": {
+            "type": "number",
+            "description": "Viewport x when not using a ref."
+          },
+          "y": {
+            "type": "number",
+            "description": "Viewport y when not using a ref."
           },
           "deltaX": {
             "type": "number"
@@ -470,7 +546,7 @@
     },
     {
       "name": "browser_snapshot",
-      "description": "Capture a ref-annotated accessibility outline of the attached tab. Optional frameId selects a child document; default is the main frame.",
+      "description": "Capture a ref-annotated accessibility outline of the attached tab. Filtering or paginating an existing observationId keeps the same refs; omitting it takes a fresh capture.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -480,6 +556,26 @@
           "frameId": {
             "type": "string",
             "description": "Frame id from browser_frames; defaults to the main frame."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
+          },
+          "maxDepth": {
+            "type": "integer",
+            "description": "Include nodes through this depth (root is 0)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Skip this many matching nodes."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Return at most this many matching nodes."
+          },
+          "observationId": {
+            "type": "string",
+            "description": "Reuse this capture instead of taking a fresh snapshot."
           }
         },
         "required": [
@@ -524,7 +620,7 @@
     },
     {
       "name": "browser_type",
-      "description": "Type text into the focused field on an attached tab.",
+      "description": "Insert text at the caret on an attached tab. Use browser_fill to replace a field.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -537,10 +633,6 @@
           "ref": {
             "type": "string",
             "description": "Optional snapshot ref to focus first."
-          },
-          "clear": {
-            "type": "boolean",
-            "description": "Select-all before typing."
           },
           "submit": {
             "type": "boolean",
@@ -581,7 +673,7 @@
     },
     {
       "name": "browser_wait_for",
-      "description": "Wait until text appears or a JS expression is truthy on an attached tab or selected frame.",
+      "description": "Wait until text appears or disappears, the URL matches, an element state is reached, or a JS expression is truthy. Returns matched and timedOut with the final observation.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -591,8 +683,24 @@
           "text": {
             "type": "string"
           },
+          "gone": {
+            "type": "boolean",
+            "description": "When true, succeed once text is absent."
+          },
+          "url": {
+            "type": "string",
+            "description": "Substring the current URL must contain."
+          },
           "expression": {
             "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "enabled, disabled, selected, expanded, or collapsed on ref."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Snapshot ref whose states are polled."
           },
           "timeoutMs": {
             "type": "integer"

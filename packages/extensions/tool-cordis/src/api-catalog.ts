@@ -895,6 +895,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'matching windows.',
       },
       {
+        signature: 'async listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>',
+        description: 'List displays through the selected provider.',
+        parameters: [{ name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+        returns: 'the current display list.',
+      },
+      {
         signature: 'grant(owner: Agent, appId: ComputerAppId, scope: ComputerGrantScope): void',
         description: 'Record a grant for `owner` on `appId`. Does not consume a `once` grant.',
         parameters: [{ name: 'owner', description: 'exact Agent that received the grant.' }, { name: 'appId', description: 'application the grant covers.' }, { name: 'scope', description: 'once (next mutating call) or session.' }],
@@ -928,6 +934,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window to focus.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
       },
       {
+        signature: 'async setWindowBounds( owner: Agent, windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal, ): Promise<void>',
+        description: 'Move and resize a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window to mutate.' }, { name: 'bounds', description: 'destination bounds in logical screen coordinates.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
         signature: 'async snapshot(owner: Agent, request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>',
         description: 'Accessibility snapshot of a granted window.',
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'request', description: 'window, node cap, and optional query.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
@@ -950,6 +961,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'handle', description: 'provider node handle.' }, { name: 'text', description: 'replacement value.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
       },
       {
+        signature: 'async focusElement(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: AbortSignal): Promise<void>',
+        description: 'Focus an accessibility node in a granted window.',
+        parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'handle', description: 'provider node handle.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
         signature: 'async action(owner: Agent, windowId: ComputerWindowId, request: ComputerActionRequest, signal?: AbortSignal): Promise<void>',
         description: 'Invoke a named accessibility action on a node in a granted window.',
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'window that owns the node.' }, { name: 'request', description: 'handle, action, and optional setValue text.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
@@ -968,6 +984,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async key(owner: Agent, windowId: ComputerWindowId, request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>',
         description: 'Press a key after a grant check on `windowId`.',
         parameters: [{ name: 'owner', description: 'exact Agent that owns the grant.' }, { name: 'windowId', description: 'declared target window.' }, { name: 'request', description: 'key and modifiers.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
+      },
+      {
+        signature: 'async releaseHeldKeys(owner: Agent, signal?: AbortSignal): Promise<void>',
+        description: 'Release every key this owner currently holds. Called on cancellation, disposal, turn completion, and helper failure.',
+        parameters: [{ name: 'owner', description: 'exact Agent whose held keys to release.' }, { name: 'signal', description: 'optional cancellation forwarded to the provider.' }],
       },
       {
         signature: 'async scroll(owner: Agent, windowId: ComputerWindowId, request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>',
@@ -4267,6 +4288,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ComputerConnectionState = \'unconfigured\' | \'configured\' | \'live\' | \'probe-failed\';',
   },
   {
+    name: 'ComputerDisplay',
+    declaration: 'export interface ComputerDisplay {\n    readonly id: ComputerDisplayId;\n    readonly bounds: ComputerRect;\n    readonly scale: number;\n    readonly primary: boolean;\n}',
+  },
+  {
     name: 'ComputerDragRequest',
     declaration: 'export interface ComputerDragRequest {\n    readonly fromX: number;\n    readonly fromY: number;\n    readonly toX: number;\n    readonly toY: number;\n    readonly modifiers?: readonly string[];\n}',
   },
@@ -4279,8 +4304,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ComputerGrantScope = \'once\' | \'session\';',
   },
   {
+    name: 'ComputerKeyAction',
+    declaration: 'export type ComputerKeyAction = \'press\' | \'down\' | \'up\';',
+  },
+  {
     name: 'ComputerKeyRequest',
-    declaration: 'export interface ComputerKeyRequest {\n    readonly key: string;\n    readonly modifiers?: readonly string[];\n    readonly repeat?: number;\n}',
+    declaration: 'export interface ComputerKeyRequest {\n    readonly key: string;\n    readonly modifiers?: readonly string[];\n    readonly repeat?: number;\n    readonly action?: ComputerKeyAction;\n}',
   },
   {
     name: 'ComputerLaunchRequest',
@@ -4288,7 +4317,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerOperation',
-    declaration: 'export type ComputerOperation = \'listApps\' | \'listWindows\' | \'launchApp\' | \'focusWindow\' | \'snapshot\' | \'screenshot\' | \'action\' | \'click\' | \'type\' | \'key\' | \'scroll\' | \'drag\' | \'move\' | \'clipboardRead\' | \'clipboardWrite\';',
+    declaration: 'export type ComputerOperation = \'listApps\' | \'listWindows\' | \'launchApp\' | \'focusWindow\' | \'listDisplays\' | \'setWindowBounds\' | \'snapshot\' | \'screenshot\' | \'action\' | \'focusElement\' | \'click\' | \'type\' | \'key\' | \'scroll\' | \'drag\' | \'move\' | \'clipboardRead\' | \'clipboardWrite\';',
   },
   {
     name: 'ComputerPermissions',
@@ -4304,7 +4333,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerProvider',
-    declaration: 'export interface ComputerProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly ComputerCapability[];\n    permissions(signal?: AbortSignal): Promise<ComputerPermissions>;\n    listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>;\n    listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>;\n    launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>;\n    focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>;\n    windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>;\n    snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>;\n    screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>;\n    press(handle: string, signal?: AbortSignal): Promise<void>;\n    setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>;\n    action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>;\n    click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>;\n    type(text: string, signal?: AbortSignal): Promise<void>;\n    key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void>;\n    scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void>;\n    drag(request: ComputerDragRequest, signal?: AbortSignal): Promise<void>;\n    move(request: ComputerPoint, signal?: AbortSignal) /* …truncated — full shape in source */',
+    declaration: 'export interface ComputerProvider {\n    readonly id: string;\n    available(): boolean;\n    capabilities(): readonly ComputerCapability[];\n    permissions(signal?: AbortSignal): Promise<ComputerPermissions>;\n    listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>;\n    listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>;\n    listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>;\n    launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>;\n    focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>;\n    setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal): Promise<void>;\n    windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>;\n    snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>;\n    screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>;\n    press(handle: string, signal?: AbortSignal): Promise<void>;\n    setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>;\n    focusElement(handle: string, signal?: AbortSignal): Promise<void>;\n    action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>;\n    click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>;\n    type(text: string, signal?: AbortSignal): Promise<void>;\n    key(request: ComputerKeyReq /* …truncated — full shape in source */',
   },
   {
     name: 'ComputerRect',
@@ -4316,7 +4345,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerScreenshotRequest',
-    declaration: 'export interface ComputerScreenshotRequest {\n    readonly windowId?: ComputerWindowId;\n    readonly displayId?: number;\n    readonly region?: ComputerRect;\n}',
+    declaration: 'export interface ComputerScreenshotRequest {\n    readonly windowId?: ComputerWindowId;\n    readonly displayId?: ComputerDisplayId;\n    readonly region?: ComputerRect;\n}',
   },
   {
     name: 'ComputerScrollRequest',
@@ -4332,7 +4361,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ComputerSnapshotRequest',
-    declaration: 'export interface ComputerSnapshotRequest {\n    readonly windowId: ComputerWindowId;\n    readonly maxNodes: number;\n    readonly query?: string;\n    readonly maxDepth?: number;\n    readonly rootHandle?: string;\n}',
+    declaration: 'export interface ComputerSnapshotRequest {\n    readonly windowId: ComputerWindowId;\n    readonly maxNodes: number;\n    readonly query?: string;\n    readonly maxDepth?: number;\n    readonly rootHandle?: string;\n    readonly timeoutMs?: number;\n}',
   },
   {
     name: 'ComputerStatus',

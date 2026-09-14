@@ -417,7 +417,7 @@ Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compactio
 }
 ```
 
-Source: [`packages/computer-use/tool-computer-use/src/index.ts:37`](../packages/computer-use/tool-computer-use/src/index.ts)
+Source: [`packages/computer-use/tool-computer-use/src/index.ts:40`](../packages/computer-use/tool-computer-use/src/index.ts)
 
 ### `deliverables/*`
 

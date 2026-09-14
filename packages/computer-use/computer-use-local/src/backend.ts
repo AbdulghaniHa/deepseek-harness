@@ -9,11 +9,13 @@ import type {
   ComputerAppId,
   ComputerCapability,
   ComputerClickRequest,
+  ComputerDisplay,
   ComputerDragRequest,
   ComputerKeyRequest,
   ComputerLaunchRequest,
   ComputerPermissions,
   ComputerPoint,
+  ComputerRect,
   ComputerScreenshot,
   ComputerScreenshotRequest,
   ComputerScrollRequest,
@@ -24,18 +26,22 @@ import type {
 } from '@deepseek-ai/dsh-computer-use'
 
 /** One OS/GUI implementation the helper process dispatches into. */
+/* jscpd:ignore-start -- DesktopBackend mirrors ComputerProvider minus registry identity. */
 export interface DesktopBackend {
   capabilities(): readonly ComputerCapability[]
   permissions(signal?: AbortSignal): Promise<ComputerPermissions>
   listApps(signal?: AbortSignal): Promise<readonly ComputerApp[]>
   listWindows(appId?: ComputerAppId, signal?: AbortSignal): Promise<readonly ComputerWindow[]>
+  listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]>
   launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp>
   focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void>
+  setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal): Promise<void>
   windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined>
   snapshot(request: ComputerSnapshotRequest, signal?: AbortSignal): Promise<ComputerSnapshot>
   screenshot(request: ComputerScreenshotRequest, signal?: AbortSignal): Promise<ComputerScreenshot>
   press(handle: string, signal?: AbortSignal): Promise<void>
   setValue(handle: string, text: string, signal?: AbortSignal): Promise<void>
+  focusElement(handle: string, signal?: AbortSignal): Promise<void>
   action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void>
   click(request: ComputerClickRequest, signal?: AbortSignal): Promise<void>
   type(text: string, signal?: AbortSignal): Promise<void>
@@ -46,3 +52,4 @@ export interface DesktopBackend {
   clipboardRead(signal?: AbortSignal): Promise<string>
   clipboardWrite(text: string, signal?: AbortSignal): Promise<void>
 }
+/* jscpd:ignore-end */

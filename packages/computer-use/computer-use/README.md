@@ -57,6 +57,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 `ComputerRuntime` is a Cordis `Service` on `ctx.computer`. Selection matches `BrowserRuntime`: configured id, else exactly one usable provider. Grants are a `WeakMap` keyed by `Agent` object identity. Deny checks and `windowAtPoint` hit-testing run in the runtime so a direct caller cannot skip the tools.
 
+Held keys retain their provider until matching key-up calls settle. Turn stop, agent disposal, runtime disposal, cancellation, and failed key dispatch attempt every matching release before clearing ownership.
+
 | File | Owns |
 |---|---|
 | `src/index.ts` | registry, grants, deny, hit-test |

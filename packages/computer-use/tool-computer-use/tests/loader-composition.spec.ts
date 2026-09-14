@@ -10,7 +10,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import ComputerRuntime, { ComputerAppId, ComputerWindowId, type ComputerProvider } from '@deepseek-ai/dsh-computer-use'
+import ComputerRuntime, { ComputerAppId, ComputerDisplayId, ComputerWindowId, type ComputerProvider } from '@deepseek-ai/dsh-computer-use'
 import * as ToolComputerUse from '@deepseek-ai/dsh-tool-computer-use'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
@@ -41,8 +41,15 @@ const FakeComputerProvider = {
         bounds: { x: 0, y: 0, width: 800, height: 600 },
         focused: true,
       }]),
+      listDisplays: () => Promise.resolve([{
+        id: ComputerDisplayId('d1'),
+        bounds: { x: 0, y: 0, width: 800, height: 600 },
+        scale: 1,
+        primary: true,
+      }]),
       launchApp: request => Promise.resolve({ id: ComputerAppId('notes'), name: request.name, pid: 1 }),
       focusWindow: () => Promise.resolve(),
+      setWindowBounds: () => Promise.resolve(),
       windowAtPoint: () => Promise.resolve(undefined),
       snapshot: request => Promise.resolve({
         windowId: request.windowId,
@@ -60,6 +67,7 @@ const FakeComputerProvider = {
       }),
       press: () => Promise.resolve(),
       setValue: () => Promise.resolve(),
+      focusElement: () => Promise.resolve(),
       action: () => Promise.resolve(),
       click: () => Promise.resolve(),
       type: () => Promise.resolve(),
@@ -130,6 +138,22 @@ describe('tool-computer-use real Loader composition through cordis.yml', () => {
     expect(result.value).toMatchObject({
       apps: [{ appId: 'notes', name: 'Notes' }],
     })
+  }, 30_000)
+
+  it('completes a mutating call with default never-mode and no approval or user-question service', async () => {
+    const ctx = await boot([])
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId('launch'),
+      name: 'computer_launch',
+      arguments: { app: 'Notes' },
+      agent: {
+        id: SessionId('loader'),
+        session: Session.create(SessionId('loader')),
+      } as unknown as Agent,
+    })
+    expect(result.isError).toBe(false)
+    expect(result.value).toMatchObject({ app: 'Notes' })
   }, 30_000)
 
   it('leaves tools unregistered when enabled is false', async () => {

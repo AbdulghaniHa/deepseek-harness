@@ -419,7 +419,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/computer-use/tool-computer-use/src/index.ts:37`](../packages/computer-use/tool-computer-use/src/index.ts)
+来源：[`packages/computer-use/tool-computer-use/src/index.ts:40`](../packages/computer-use/tool-computer-use/src/index.ts)
 ### `deliverables/*`
 
 <a id="deliverablespresented--log-only"></a>

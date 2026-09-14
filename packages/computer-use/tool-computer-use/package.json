@@ -40,7 +40,8 @@
     "@deepseek-ai/dsh-util-values": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "workspace:^"
+    "@deepseek-ai/schemastery": "workspace:^",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

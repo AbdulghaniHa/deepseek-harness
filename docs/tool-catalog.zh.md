@@ -45,8 +45,8 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
-| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
-| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_drag`, `computer_focus`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`、`ctx.computer`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result`、`computer/app-grant` | - | computer_* 工具把原生 helper 放在 ctx.computer 之后，使模型可见名称在 helper 宕机时保持稳定。`dsh-base` 发布时为 `enabled: false`。 |
+| `@deepseek-ai/dsh-tool-browser` | `browser_attach`, `browser_bookmarks`, `browser_cdp`, `browser_click`, `browser_close`, `browser_console`, `browser_downloads`, `browser_drag`, `browser_evaluate`, `browser_fill`, `browser_frames`, `browser_handle_dialog`, `browser_history_search`, `browser_hover`, `browser_navigate`, `browser_network`, `browser_network_body`, `browser_open`, `browser_press_key`, `browser_reading_list`, `browser_screenshot`, `browser_scroll`, `browser_select_option`, `browser_snapshot`, `browser_status`, `browser_tabs`, `browser_text`, `browser_type`, `browser_upload`, `browser_wait_for`, `browser_wait_for_download` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result` | - | browser_* 工具把 Chrome Native Messaging 放在 ctx.browser 之后，使模型可见名称在 host 断开时保持稳定。本目录以 `allowRawCdp: true` 采集 `browser_cdp`；`dsh-base` 发布时为 `enabled: false` 且 `allowRawCdp: false`。 |
+| `@deepseek-ai/dsh-tool-computer-use` | `computer_action`, `computer_apps`, `computer_click`, `computer_clipboard`, `computer_displays`, `computer_drag`, `computer_focus`, `computer_focus_element`, `computer_launch`, `computer_mouse_move`, `computer_observe`, `computer_press_key`, `computer_screenshot`, `computer_scroll`, `computer_set_window_bounds`, `computer_snapshot`, `computer_status`, `computer_type`, `computer_wait_for` | `ctx.tools`、`ctx.computer`、`ctx.systemPrompt`、`调用时可选的 ctx.approval` | `tool/call`、`tool/result`、`computer/app-grant` | - | computer_* 工具把原生 helper 放在 ctx.computer 之后，使模型可见名称在 helper 宕机时保持稳定。`dsh-base` 发布时为 `enabled: false`。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2370,6 +2370,21 @@ Click a snapshot ref or raw viewport coordinates on an attached tab.
     "y": {
       "type": "number",
       "description": "Viewport y when not using a ref."
+    },
+    "button": {
+      "type": "string",
+      "description": "left, right, or middle. Defaults to left."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Click count. Defaults to 1."
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2410,6 +2425,18 @@ Read recent console messages from an attached tab.
   "properties": {
     "tabId": {
       "type": "string"
+    },
+    "filter": {
+      "type": "string",
+      "description": "Substring matched against level or text, ignoring case."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum entries to return, newest kept."
+    },
+    "clear": {
+      "type": "boolean",
+      "description": "Drop retained messages after reading."
     }
   },
   "required": [
@@ -2465,6 +2492,13 @@ Drag from a snapshot ref or viewport point to another in the same frame using tr
     },
     "toY": {
       "type": "number"
+    },
+    "modifiers": {
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2477,7 +2511,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
 
 ### `browser_evaluate`
 
-Run a JavaScript expression in the attached tab or selected frame and return a JSON value. Requires approval.
+Run a JavaScript expression in the attached tab or selected frame and return a JSON value.
 
 ```json
 {
@@ -2497,6 +2531,38 @@ Run a JavaScript expression in the attached tab or selected frame and return a J
   "required": [
     "tabId",
     "expression"
+  ]
+}
+```
+
+来源： [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+### `browser_fill`
+
+替换当前焦点字段的内容。在光标处插入请用 browser_type。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "tabId": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref to focus first."
+    },
+    "submit": {
+      "type": "boolean",
+      "description": "Press Enter after filling."
+    }
+  },
+  "required": [
+    "tabId",
+    "text"
   ]
 }
 ```
@@ -2724,8 +2790,11 @@ Press a single key with optional modifiers on an attached tab.
       "type": "string"
     },
     "modifiers": {
-      "type": "integer",
-      "description": "CDP modifier bitmask."
+      "type": "array",
+      "description": "alt, ctrl, meta, and/or shift.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -2792,6 +2861,18 @@ Scroll the page or a snapshot ref on an attached tab.
     "tabId": {
       "type": "string"
     },
+    "ref": {
+      "type": "string",
+      "description": "Optional snapshot ref whose center receives the wheel event."
+    },
+    "x": {
+      "type": "number",
+      "description": "Viewport x when not using a ref."
+    },
+    "y": {
+      "type": "number",
+      "description": "Viewport y when not using a ref."
+    },
     "deltaX": {
       "type": "number"
     },
@@ -2849,6 +2930,26 @@ Capture a ref-annotated accessibility outline of the attached tab. Optional fram
     "frameId": {
       "type": "string",
       "description": "Frame id from browser_frames; defaults to the main frame."
+    },
+    "query": {
+      "type": "string",
+      "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
+    },
+    "maxDepth": {
+      "type": "integer",
+      "description": "Include nodes through this depth (root is 0)."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Skip this many matching nodes."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Return at most this many matching nodes."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Reuse this capture instead of taking a fresh snapshot."
     }
   },
   "required": [
@@ -2927,10 +3028,6 @@ Type text into the focused field on an attached tab.
       "type": "string",
       "description": "Optional snapshot ref to focus first."
     },
-    "clear": {
-      "type": "boolean",
-      "description": "Select-all before typing."
-    },
     "submit": {
       "type": "boolean",
       "description": "Press Enter after typing."
@@ -2990,8 +3087,24 @@ Wait until text appears or a JS expression is truthy on an attached tab or selec
     "text": {
       "type": "string"
     },
+    "gone": {
+      "type": "boolean",
+      "description": "When true, succeed once text is absent."
+    },
+    "url": {
+      "type": "string",
+      "description": "Substring the current URL must contain."
+    },
     "expression": {
       "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "description": "enabled, disabled, selected, expanded, or collapsed on ref."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Snapshot ref whose states are polled."
     },
     "timeoutMs": {
       "type": "integer"
@@ -3054,7 +3167,7 @@ Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-
     },
     "ref": {
       "type": "string",
-      "description": "Epoch-scoped snapshot ref."
+      "description": "Observation-scoped snapshot ref."
     },
     "action": {
       "type": "string",
@@ -3102,7 +3215,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
     },
     "ref": {
       "type": "string",
-      "description": "Epoch-scoped snapshot ref."
+      "description": "Observation-scoped snapshot ref."
     },
     "x": {
       "type": "number",
@@ -3164,6 +3277,19 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
   "required": [
     "action"
   ]
+}
+```
+
+来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_displays`
+
+列出已连接显示器：带品牌化 id、逻辑边界、缩放，以及哪一块是主屏。
+
+```json
+{
+  "type": "object",
+  "properties": {}
 }
 ```
 
@@ -3252,6 +3378,32 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
   },
   "required": [
     "windowId"
+  ]
+}
+```
+
+来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
+### `computer_focus_element`
+
+聚焦窗口中的快照 ref，然后确认该窗口位于前台。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Observation-scoped snapshot ref."
+    }
+  },
+  "required": [
+    "windowId",
+    "ref"
   ]
 }
 ```
@@ -3381,6 +3533,10 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
     "repeat": {
       "type": "number",
       "description": "How many times to press. Defaults to 1."
+    },
+    "action": {
+      "type": "string",
+      "description": "press (default), down, or up."
     }
   },
   "required": [
@@ -3403,6 +3559,10 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
     "windowId": {
       "type": "string",
       "description": "Window to capture; omit for the full display."
+    },
+    "displayId": {
+      "type": "string",
+      "description": "Display id from computer_displays; omit for the primary display."
     },
     "region": {
       "type": "object",
@@ -3493,6 +3653,43 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
 
 来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
 
+### `computer_set_window_bounds`
+
+在逻辑屏幕坐标中移动并调整窗口大小。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windowId": {
+      "type": "string",
+      "description": "Window id from computer_apps."
+    },
+    "x": {
+      "type": "number"
+    },
+    "y": {
+      "type": "number"
+    },
+    "width": {
+      "type": "number"
+    },
+    "height": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "windowId",
+    "x",
+    "y",
+    "width",
+    "height"
+  ]
+}
+```
+
+来源： [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/computer-use/tool-computer-use/src/index.ts)
+
 ### `computer_snapshot`
 
 把窗口的无障碍树读成带 epoch 作用域的大纲。纯文本模型路由上的主观察。maxDepth 与当前快照 ref 可选择子树；输出包含节点状态和支持的操作。
@@ -3507,7 +3704,7 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
     },
     "query": {
       "type": "string",
-      "description": "Optional role or name substring filter."
+      "description": "Optional role or name substring filter. Preserves refs when observationId is reused."
     },
     "maxDepth": {
       "type": "number",
@@ -3516,6 +3713,10 @@ Source: [`packages/computer-use/tool-computer-use/src/index.ts`](../packages/com
     "ref": {
       "type": "string",
       "description": "Optional current snapshot ref whose node becomes the subtree root."
+    },
+    "observationId": {
+      "type": "string",
+      "description": "Reuse this capture instead of taking a fresh snapshot."
     }
   },
   "required": [

@@ -54,7 +54,9 @@ The first use starts the helper lazily. A helper exit fails in-flight calls with
 
 The plugin registers `LocalComputerProvider` on `ctx.computer` and disposes the helper with the fiber. `ComputerHostClient` frames JSON-RPC lines on the subprocess pipes. `handleComputerMethod` in the helper dispatches onto a `DesktopBackend` (simulang or platform). The plugin forwards `windowCacheMs` to the helper as `--window-cache-ms=<n>` on argv.
 
-The simulang adapter binds `Machine.local()` once per helper. Window ids are `<pid>:<title>` (`#n` suffix on duplicate titles), app ids are `pid:<pid>`, and app names come from `ps` / `tasklist` so the fixed deny list matches real process names. `snapshot` builds `AccessibilityTree.fromWindow(window).snapshot()`, keeps that tree per window, and returns handles `<refId>@<windowId>`; `press` dispatches by the role recorded at snapshot time (`activate`, `toggle`, `select`, or `expandCollapse`) and `setValue` calls the tree directly. `password` nodes are `secure` and carry no value. Pointer and key input synthesize through `Machine` with modifiers held around the action; key names accept simulang's `keyFromString` vocabulary plus `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`, a space, `Esc`, `Cmd`, and `Ctrl`. The adapter installs simulang's logger so native log lines reach stderr, never the JSON-RPC stdout.
+Provider disposal awaits key-up calls before terminating the helper, including key-down calls whose response failed. When simulang returns no window hit, its live accessibility hit node and native ancestor identity determine the window; coordinates alone do not establish a match.
+
+The simulang adapter binds `Machine.local()` once per helper. When the addon reports `nativeId`, window ids are opaque `wN` values fenced by helper lifetime and survive title changes; a destroyed then recreated native handle mints a new id. When `nativeId` is absent, ids remain `<pid>:<title>` (`#n` suffix on duplicate titles). App ids are `pid:<pid>`, and app names come from `ps` / `tasklist` so the fixed deny list matches real process names. `snapshot` builds `AccessibilityTree.fromWindow(window).snapshot()`, keeps that tree per window, and returns handles `<refId>@<windowId>`; `press` dispatches by the role recorded at snapshot time (`activate`, `toggle`, `select`, or `expandCollapse`) and `setValue` calls the tree directly. `password` nodes are `secure` and carry no value. Pointer and key input synthesize through `Machine` with modifiers held around the action; key names accept simulang's `keyFromString` vocabulary plus `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`, a space, `Esc`, `Cmd`, and `Ctrl`. The adapter installs simulang's logger so native log lines reach stderr, never the JSON-RPC stdout.
 
 | File | Owns |
 |---|---|
@@ -94,6 +96,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 <a id="known-limitations-and-deferred-work"></a>
 
+- **Native extension is incomplete** — published v13 lacks stable native window ids and window resizing; the optional adapter methods do not provide those features. A patched binary requires access to upstream’s private Rust dependency. Element focus falls back to a pointer click when tree focus is absent.
 - **Windows is foreground-only** — synthesized input cannot target background windows.
 - **Wayland input is unsupported** — doctor reports `inputInjection: denied` when `WAYLAND_DISPLAY` is set.
 - **Native binary is optional** — `@simular-ai/simulang-js` ships prebuilt binaries for macOS, Linux glibc, and Windows x64/arm64 only; elsewhere the OS fallback serves screenshots and clipboard, and accessibility snapshots, `press`, and `setValue` throw `COMPUTER_UNSUPPORTED`.

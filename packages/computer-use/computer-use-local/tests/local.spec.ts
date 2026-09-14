@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import ComputerRuntime, { ComputerAppId, ComputerError, ComputerWindowId } from '@deepseek-ai/dsh-computer-use'
+import ComputerRuntime, { ComputerAppId, ComputerDisplayId, ComputerError, ComputerWindowId } from '@deepseek-ai/dsh-computer-use'
 import {
   ComputerHostClient,
   Config,
@@ -44,7 +44,7 @@ import { encodeLine, rpcRequest } from '../src/protocol.ts'
 
 function io(stdout = 'TextEdit') {
   return {
-    run: vi.fn(async () => stdout),
+    run: vi.fn(async (_argv: readonly string[]) => stdout),
     write: vi.fn(async () => undefined),
     capturePng: vi.fn(async () => new Uint8Array([1, 2, 3])),
   }
@@ -63,8 +63,15 @@ function fakeBackend(overrides: Partial<DesktopBackend> = {}): DesktopBackend {
     permissions: () => Promise.resolve({ accessibility: 'granted', screenRecording: 'granted', inputInjection: 'granted' }),
     listApps: () => Promise.resolve([{ id: ComputerAppId('notes'), name: 'Notes', pid: 9 }]),
     listWindows: () => Promise.resolve([window]),
+    listDisplays: () => Promise.resolve([{
+      id: ComputerDisplayId('d1'),
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+      scale: 1,
+      primary: true,
+    }]),
     launchApp: request => Promise.resolve({ id: ComputerAppId(request.name), name: request.name, pid: 1 }),
     focusWindow: () => Promise.resolve(),
+    setWindowBounds: () => Promise.resolve(),
     windowAtPoint: () => Promise.resolve(window),
     snapshot: request => Promise.resolve({
       windowId: request.windowId,
@@ -82,6 +89,7 @@ function fakeBackend(overrides: Partial<DesktopBackend> = {}): DesktopBackend {
     }),
     press: () => Promise.resolve(),
     setValue: () => Promise.resolve(),
+    focusElement: () => Promise.resolve(),
     action: () => Promise.resolve(),
     click: () => Promise.resolve(),
     type: () => Promise.resolve(),
@@ -120,7 +128,14 @@ describe('platform backend', () => {
     await backend.click({ x: 10.4, y: 20.6 })
     await backend.type('hi')
     await backend.key({ key: 'Enter' })
-    expect(await backend.windowAtPoint(0, 0)).toBeUndefined()
+    runner.run.mockResolvedValueOnce('TextEdit')
+    runner.run.mockResolvedValueOnce('Untitled')
+    expect(await backend.windowAtPoint(0, 0)).toMatchObject({ title: 'Untitled' })
+    expect(await backend.windowAtPoint(900, 900)).toBeUndefined()
+    expect((await backend.listDisplays())[0]?.id).toBe('d1')
+    await expect(backend.setWindowBounds(ComputerWindowId('TextEdit:0'), { x: 0, y: 0, width: 1, height: 1 }))
+      .rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
+    await expect(backend.focusElement('n')).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     const shot = await backend.screenshot({})
     expect(shot.png).toEqual(new Uint8Array([1, 2, 3]))
     expect(await backend.clipboardRead()).toBe('TextEdit, Finder')
@@ -164,6 +179,37 @@ describe('platform backend', () => {
 
     const empty = createPlatformBackend({ platform: 'darwin', io: io('') })
     expect(await empty.listApps()).toEqual([])
+
+    const x11 = io('PID COMMAND\n 1 systemd')
+    x11.run.mockImplementation(async (argv: readonly string[]) => {
+      if (argv[0] === 'xdotool' && argv.includes('search')) return '123\n456\n789\n999\nnot-a-window'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowname') && argv.includes('999')) throw new Error('gone')
+      if (argv[0] === 'xdotool' && argv.includes('getwindowname')) return 'Gedit'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowgeometry') && argv.includes('456')) return 'WIDTH=10\nHEIGHT=10\n'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowgeometry') && argv.includes('789')) return 'X=1\nY=2\n'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowgeometry')) return 'X=10\nY=20\nWIDTH=100\nHEIGHT=50\n'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowpid') && argv.includes('123')) return '42'
+      if (argv[0] === 'xdotool' && argv.includes('getwindowpid')) return 'nope'
+      return 'PID COMMAND\n 1 systemd'
+    })
+    const linuxX11 = createPlatformBackend({ platform: 'linux', wayland: false, io: x11 })
+    const x11Windows = await linuxX11.listWindows()
+    expect(x11Windows[0]).toMatchObject({ id: '123', title: 'Gedit', bounds: { x: 10, y: 20, width: 100, height: 50 } })
+    expect(x11Windows.some(window => window.id === '456' && window.bounds.x === 0 && window.bounds.y === 0)).toBe(true)
+    expect(x11Windows.some(window => window.id === '789' && window.bounds.width === 0)).toBe(true)
+    expect(x11Windows.some(window => window.id === '999')).toBe(false)
+    expect(await linuxX11.listWindows(ComputerAppId('pid:42'))).toHaveLength(1)
+    expect(await linuxX11.windowAtPoint(15, 25)).toMatchObject({ id: '123' })
+    expect(await linuxX11.windowAtPoint(0, 0)).toMatchObject({ id: '456' })
+    const missingXdotool = createPlatformBackend({
+      platform: 'linux',
+      wayland: false,
+      io: { ...io('PID COMMAND\n 1 systemd'), run: vi.fn(async (argv: readonly string[]) => {
+        if (argv[0] === 'xdotool') throw new Error('missing')
+        return 'PID COMMAND\n 1 systemd'
+      }) },
+    })
+    expect(await missingXdotool.listWindows()).toEqual([])
 
     const winFallback = createPlatformBackend({ platform: 'win32', io: io('notepad.exe\n"app","abc"\n,') })
     const winApps = await winFallback.listApps()
@@ -226,6 +272,7 @@ interface FakeWindowSpec {
   title: string
   /** A minimized window: simulang's binding throws from `boundingBox`. */
   minimized?: boolean
+  nativeId?: string
 }
 
 function fakeSimulang(options: {
@@ -235,6 +282,9 @@ function fakeSimulang(options: {
   screenCapture?: boolean
   windowsThrow?: boolean
   withLogger?: boolean
+  omitScreens?: boolean
+  omitTreeFocus?: boolean
+  omitSetBounds?: boolean
 } = {}) {
   const calls: string[] = []
   const shot = (width: number, height: number): SimulangScreenshot => ({
@@ -244,6 +294,7 @@ function fakeSimulang(options: {
   const makeWindow = (spec: FakeWindowSpec): SimulangWindow => ({
     pid: spec.pid,
     title: spec.title,
+    ...spec.nativeId !== undefined ? { nativeId: spec.nativeId } : {},
     boundingBox: () => {
       if (spec.minimized === true) {
         throw new Error('bounding box right (0) must be greater than left (0) (window is minimized; show it before capturing)')
@@ -252,6 +303,9 @@ function fakeSimulang(options: {
     },
     focus: () => { calls.push(`focus ${spec.pid}:${spec.title}`); return true },
     screenshot: () => shot(300, 200),
+    ...options.omitSetBounds === true ? {} : {
+      setBounds: (box) => { calls.push(`bounds ${box.left},${box.top} ${box.width}x${box.height}`); return true },
+    },
   })
   let windows = (options.windows ?? [{ pid: 7, title: 'Notes' }]).map(makeWindow)
   const tree: SimulangTree = {
@@ -261,6 +315,7 @@ function fakeSimulang(options: {
     toggle: (refId) => { calls.push(`toggle ${refId}`) },
     select: (refId) => { calls.push(`select ${refId}`) },
     expandCollapse: (refId) => { calls.push(`expandCollapse ${refId}`) },
+    ...options.omitTreeFocus === true ? {} : { focus: (refId) => { calls.push(`focusEl ${refId}`) } },
   }
   let enumerations = 0
   const machine: SimulangMachine = {
@@ -271,8 +326,17 @@ function fakeSimulang(options: {
       return windows
     },
     focusedWindow: () => options.focused === undefined ? windows[0] ?? null : options.focused === null ? null : makeWindow(options.focused),
-    windowAtPoint: (x, y) => x < 0 ? null : makeWindow({ pid: 7, title: `at ${x},${y}` }),
+    windowAtPoint: (x, y) => {
+      if (x < 0) return null
+      if (x === 5 && y === 6) return makeWindow({ pid: 7, title: 'Notes' })
+      if (x > 1000) return makeWindow({ pid: 7, title: `at ${x},${y}`, nativeId: 'hit' })
+      return makeWindow({ pid: 7, title: `at ${x},${y}` })
+    },
+    windowByNativeId: nativeId => makeWindow({ pid: 7, title: 'Looked', nativeId }),
     mainScreen: () => ({ screenshot: () => shot(1920, 1080), boundingBox: () => ({ left: 0, top: 0, width: 960, height: 540 }) }),
+    ...options.omitScreens === true ? {} : {
+      screens: () => [{ screenshot: () => shot(1920, 1080), boundingBox: () => ({ left: 0, top: 0, width: 960, height: 540 }), nativeId: 'main', scale: 2 }],
+    },
     screenshotCropped: (x, y, width, height) => { calls.push(`crop ${x},${y} ${width}x${height}`); return shot(width, height) },
     mouseButton: (button, direction) => { calls.push(`button ${button} ${direction}`) },
     moveMouse: (x, y, coordinate) => { calls.push(`move ${x},${y} ${coordinate}`) },
@@ -311,6 +375,29 @@ function fakeSimulang(options: {
 }
 
 describe('simulang adapter', () => {
+  it('uses native accessibility ancestry when window hit-testing returns null', async () => {
+    const fake = fakeSimulang({ windows: [{ pid: 7, title: 'Other' }, { pid: 7, title: 'Target' }] })
+    const machine = fake.module.Machine.local()
+    const windows = machine.windows()
+    const root = {
+      ancestors: () => [root],
+      lowestCommonAncestor: (other: unknown) => other === hit ? [root, 1] as const : null,
+    }
+    const hit = { ancestors: () => [root, root], lowestCommonAncestor: () => null }
+    machine.windowAtPoint = () => null
+    machine.nodeAtPoint = () => hit
+    machine.windows = () => windows.map(window => ({
+      ...window,
+      node: () => window.title === 'Target' ? root : { ...root, lowestCommonAncestor: () => null },
+    }))
+    const backend = createSimulangBackend(fake.module)
+    expect(await backend.windowAtPoint(15, 25)).toMatchObject({ id: '7:Target' })
+    machine.nodeAtPoint = () => null
+    expect(await backend.windowAtPoint(15, 25)).toBeUndefined()
+    machine.nodeAtPoint = () => ({ ...hit })
+    expect(await backend.windowAtPoint(15, 25)).toBeUndefined()
+  })
+
   it('accepts only modules exposing the v13 class API', async () => {
     const real = await loadSimulang()
     expect(real === undefined || typeof real.Machine.local === 'function').toBe(true)
@@ -355,6 +442,39 @@ describe('simulang adapter', () => {
     expect(fake.calls).toContain('focus 9:Editor')
     expect(await backend.windowAtPoint(-1, 0)).toBeUndefined()
     expect(await backend.windowAtPoint(3, 4)).toMatchObject({ id: '7:at 3,4', appId: 'pid:7', focused: false })
+    expect(await backend.windowAtPoint(5, 6)).toMatchObject({ id: '7:Notes' })
+    expect(await backend.windowAtPoint(1001, 0)).toMatchObject({ title: 'Looked' })
+    const unfocused = createSimulangBackend(fakeSimulang({ focused: null }).module, { processNames: async () => new Map() })
+    expect((await unfocused.listWindows())[0]?.focused).toBe(false)
+  })
+
+  it('keeps opaque window ids across title changes when nativeId is present', async () => {
+    const fake = fakeSimulang({ windows: [{ pid: 7, title: 'Notes', nativeId: 'AX1' }] })
+    const backend = createSimulangBackend(fake.module, { processNames: async () => new Map(), windowCacheMs: 0 })
+    const first = await backend.listWindows()
+    expect(first[0]?.id).toBe('w1')
+    fake.setWindows([{ pid: 7, title: 'Renamed', nativeId: 'AX1' }])
+    const renamed = await backend.listWindows()
+    expect(renamed[0]).toMatchObject({ id: 'w1', title: 'Renamed' })
+    fake.setWindows([])
+    expect(await backend.listWindows()).toEqual([])
+    fake.setWindows([{ pid: 7, title: 'Notes', nativeId: 'AX1' }])
+    expect((await backend.listWindows())[0]?.id).toBe('w2')
+    await backend.setWindowBounds(ComputerWindowId('w2'), { x: 1, y: 2, width: 3, height: 4 })
+    expect(fake.calls).toContain('bounds 1,2 3x4')
+    const displays = await backend.listDisplays()
+    expect(displays[0]).toMatchObject({ id: 'd:main', scale: 2, primary: true })
+    const displayShot = await backend.screenshot({ displayId: ComputerDisplayId('d:main') })
+    expect(displayShot).toMatchObject({ width: 1920, height: 1080, scale: 2 })
+    const unnamedDisplay = createSimulangBackend(fakeSimulang().module, { processNames: async () => new Map() })
+    expect((await unnamedDisplay.screenshot({ displayId: ComputerDisplayId('d:main') })).width).toBe(1920)
+    await expect(backend.screenshot({ displayId: ComputerDisplayId('gone') }))
+      .rejects.toMatchObject({ code: 'COMPUTER_WINDOW_GONE' })
+    const noScreens = createSimulangBackend(fakeSimulang({ omitScreens: true }).module, { processNames: async () => new Map() })
+    expect((await noScreens.listDisplays())[0]?.id).toBe('d1')
+    const noBounds = createSimulangBackend(fakeSimulang({ omitSetBounds: true }).module, { processNames: async () => new Map() })
+    await expect(noBounds.setWindowBounds(ComputerWindowId('7:Notes'), { x: 1, y: 2, width: 3, height: 4 }))
+      .rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
   })
 
   it('lists a minimized window with an empty box instead of failing the enumeration', async () => {
@@ -419,6 +539,8 @@ describe('simulang adapter', () => {
     expect(label).toMatchObject({ handle: '', supportsPress: false, supportsSetValue: false })
     expect(logo?.supportsPress).toBe(true)
     await backend.press(ok!.handle)
+    await backend.focusElement(ok!.handle)
+    expect(fake.calls).toContain('focusEl 1')
     await backend.press(bold!.handle)
     await backend.press(tab!.handle)
     await backend.press(pick!.handle)
@@ -442,6 +564,23 @@ describe('simulang adapter', () => {
     await expect(backend.press('nope')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
     await expect(backend.press('@7:Notes')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
     await expect(backend.snapshot({ windowId: ComputerWindowId('1:Gone'), maxNodes: 1 })).rejects.toMatchObject({ code: 'COMPUTER_WINDOW_GONE' })
+    const timed = await backend.snapshot({ windowId, maxNodes: 50, timeoutMs: 0 })
+    expect(timed.truncated).toBe(true)
+  })
+
+  it('clicks an element when simulang has no tree.focus', async () => {
+    const fake = fakeSimulang({
+      omitTreeFocus: true,
+      tree: { role: 0, name: 'Notes', refId: 0, children: [{ role: 1, name: 'OK', refId: 1 }] },
+    })
+    const backend = createSimulangBackend(fake.module)
+    const snap = await backend.snapshot({ windowId: ComputerWindowId('7:Notes'), maxNodes: 10 })
+    const ok = snap.nodes[0]?.children?.[0]
+    await backend.focusElement(ok!.handle)
+    expect(fake.calls.some(call => call.startsWith('move '))).toBe(true)
+    await expect(backend.focusElement('99@7:Notes')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
+    const unloaded = createSimulangBackend(fakeSimulang({ omitTreeFocus: true }).module)
+    await expect(unloaded.focusElement('1@7:Notes')).rejects.toMatchObject({ code: 'COMPUTER_STALE_REF' })
   })
 
   it('captures screenshots for regions, windows, and the main screen with a derived scale', async () => {
@@ -474,6 +613,8 @@ describe('simulang adapter', () => {
     await backend.scroll({ x: 5, y: 6, direction: 'right', amount: 4 })
     await backend.move({ x: 9, y: 9 })
     await backend.drag({ fromX: 0, fromY: 0, toX: 8, toY: 8 })
+    await backend.key({ key: 'a', action: 'down' })
+    await backend.key({ key: 'a', action: 'up' })
     expect(await backend.clipboardRead()).toBe('')
     await backend.clipboardWrite('z')
     expect(await backend.clipboardRead()).toBe('pasted')
@@ -492,6 +633,7 @@ describe('simulang adapter', () => {
       'move 5,6 0', 'scroll 4,0',
       'move 9,9 0',
       'move 0,0 0', 'button 0 0', 'move 8,8 0', 'button 0 1',
+      'key 10 0', 'key 10 1',
       'clip set', 'clip z',
     ])
     await expect(backend.key({ key: 'Hyper' })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
@@ -550,24 +692,30 @@ describe('JSON-RPC dispatch', () => {
     expect(await handleComputerMethod(backend, 'permissions', null)).toMatchObject({ accessibility: 'granted' })
     expect(await handleComputerMethod(backend, 'listApps', {})).toHaveLength(1)
     expect(await handleComputerMethod(backend, 'listWindows', { appId: 'notes' })).toHaveLength(1)
+    expect(await handleComputerMethod(backend, 'listDisplays', {})).toHaveLength(1)
     expect(await handleComputerMethod(backend, 'launchApp', { name: 'Notes' })).toMatchObject({ name: 'Notes' })
     expect(await handleComputerMethod(backend, 'focusWindow', { windowId: 'w1' })).toBeNull()
+    expect(await handleComputerMethod(backend, 'setWindowBounds', { windowId: 'w1', x: 1, y: 2, width: 3, height: 4 })).toBeNull()
     expect(await handleComputerMethod(backend, 'windowAtPoint', { x: 1, y: 2 })).toMatchObject({ id: 'w1' })
     expect(await handleComputerMethod(backend, 'snapshot', { windowId: 'w1', query: 'button', maxDepth: 1, rootHandle: 'n' })).toMatchObject({ title: 'Notes' })
+    expect(await handleComputerMethod(backend, 'snapshot', { windowId: 'w1', timeoutMs: 5 })).toMatchObject({ title: 'Notes' })
     const shot = await handleComputerMethod(backend, 'screenshot', {
       windowId: 'w1',
-      displayId: 1,
+      displayId: 'd1',
       region: { x: 0, y: 0, width: 1, height: 1 },
     }) as { pngBase64: string }
     expect(Buffer.from(shot.pngBase64, 'base64')[0]).toBe(137)
     expect(await handleComputerMethod(backend, 'press', { handle: 'n' })).toBeNull()
     expect(await handleComputerMethod(backend, 'setValue', { handle: 'n', text: 'v' })).toBeNull()
+    expect(await handleComputerMethod(backend, 'focusElement', { handle: 'n' })).toBeNull()
     expect(await handleComputerMethod(backend, 'action', { handle: 'n', action: 'toggle' })).toBeNull()
     expect(await handleComputerMethod(backend, 'action', { handle: 'n', action: 'setValue', value: 'x' })).toBeNull()
     await expect(handleComputerMethod(backend, 'action', { handle: 'n', action: 'nope' })).rejects.toMatchObject({ code: 'COMPUTER_UNSUPPORTED' })
     expect(await handleComputerMethod(backend, 'click', { x: 1, y: 2, button: 'right', count: 2, modifiers: ['shift'] })).toBeNull()
     expect(await handleComputerMethod(backend, 'type', { text: 'hi' })).toBeNull()
     expect(await handleComputerMethod(backend, 'key', { key: 'a', modifiers: ['shift'], repeat: 2 })).toBeNull()
+    expect(await handleComputerMethod(backend, 'key', { key: 'a', action: 'down' })).toBeNull()
+    expect(await handleComputerMethod(backend, 'key', { key: 'a', action: 'up' })).toBeNull()
     expect(await handleComputerMethod(backend, 'scroll', { x: 0, y: 0, direction: 'up', amount: 2, modifiers: ['alt'] })).toBeNull()
     expect(await handleComputerMethod(backend, 'move', { x: 3, y: 4 })).toBeNull()
     expect(await handleComputerMethod(backend, 'drag', { fromX: 0, fromY: 0, toX: 1, toY: 1 })).toBeNull()
@@ -600,6 +748,8 @@ describe('JSON-RPC dispatch', () => {
     expect(await handleComputerMethod(backend, 'listWindows', {})).toHaveLength(1)
     const shot = await handleComputerMethod(backend, 'screenshot', {}) as { pngBase64: string }
     expect(typeof shot.pngBase64).toBe('string')
+    const displayShot = await handleComputerMethod(backend, 'screenshot', { displayId: 'd1' }) as { pngBase64: string }
+    expect(typeof displayShot.pngBase64).toBe('string')
     expect(await handleComputerMethod(backend, 'snapshot', { windowId: 'w1', maxNodes: 3 })).toMatchObject({ title: 'Notes' })
   })
 })
@@ -900,6 +1050,9 @@ describe('local provider + plugin', () => {
     await provider.listWindows(ComputerAppId('a'))
     await provider.launchApp({ name: 'A' })
     await provider.focusWindow(ComputerWindowId('w'))
+    await provider.listDisplays()
+    await provider.setWindowBounds(ComputerWindowId('w'), { x: 1, y: 2, width: 3, height: 4 })
+    await provider.focusElement('n')
     expect(await provider.windowAtPoint(0, 0)).toMatchObject({ id: 'w1' })
     expect(await provider.windowAtPoint(9, 9)).toBeUndefined()
     await provider.snapshot({ windowId: ComputerWindowId('w'), maxNodes: 1 })
@@ -917,6 +1070,46 @@ describe('local provider + plugin', () => {
     await provider.clipboardWrite('z')
     await provider.dispose()
     expect(client.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the helper alive until an in-flight key-down and matching release settle', async () => {
+    const finish = Promise.withResolvers<undefined>()
+    const events: string[] = []
+    const client = {
+      call: async (_method: string, request: { action: string }) => {
+        if (request.action === 'down') await finish.promise
+        events.push(request.action)
+      },
+      dispose: async () => { events.push('disposed') },
+    }
+    const provider = new LocalComputerProvider(new Context(), {
+      requestTimeoutMs: 1000, windowCacheMs: 0, graceMs: 100, client: client as never,
+    })
+    const down = provider.key({ key: 'Shift', action: 'down' })
+    const disposal = provider.dispose()
+    finish.resolve(undefined)
+    await Promise.all([down, disposal])
+    expect(events).toEqual(['down', 'up', 'disposed'])
+  })
+
+  it('awaits key releases before disposing the helper, including uncertain key-downs', async () => {
+    const events: string[] = []
+    const client = {
+      call: async (_method: string, request: { key: string; action: string }) => {
+        await Promise.resolve()
+        events.push(`${request.key}:${request.action}`)
+        if (request.key === 'Control' && request.action === 'down') throw new Error('response lost')
+      },
+      dispose: async () => { events.push('disposed') },
+    }
+    const provider = new LocalComputerProvider(new Context(), {
+      requestTimeoutMs: 1000, windowCacheMs: 0, graceMs: 100, client: client as never,
+    })
+    await provider.key({ key: 'Shift', action: 'down' })
+    await expect(provider.key({ key: 'Control', action: 'down' })).rejects.toThrow('response lost')
+    await Promise.all([provider.dispose(), provider.dispose()])
+    expect(events).toEqual(['Shift:down', 'Control:down', 'Control:up', 'Shift:up', 'disposed'])
+    await expect(provider.key({ key: 'a' })).rejects.toThrow('disposed')
   })
 
   it('rejects a malformed screenshot payload', async () => {

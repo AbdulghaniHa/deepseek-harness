@@ -20,6 +20,7 @@ const BROWSER_TOOLS = [
   'browser_screenshot',
   'browser_click',
   'browser_type',
+  'browser_fill',
   'browser_press_key',
   'browser_scroll',
   'browser_drag',

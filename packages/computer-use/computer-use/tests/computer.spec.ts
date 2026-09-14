@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import ComputerRuntime, {
   ComputerAppId,
+  ComputerDisplayId,
   ComputerError,
   ComputerWindowId,
   connectionState,
@@ -63,8 +65,15 @@ function makeProvider(id: string, available: boolean, extras: Partial<ComputerPr
     }),
     listApps: () => Promise.resolve([first]),
     listWindows: () => Promise.resolve([firstWindow]),
+    listDisplays: () => Promise.resolve([{
+      id: ComputerDisplayId('d1'),
+      bounds: BOUNDS,
+      scale: 1,
+      primary: true,
+    }]),
     launchApp: request => Promise.resolve(app('launched', { name: request.name })),
     focusWindow: () => Promise.resolve(),
+    setWindowBounds: () => Promise.resolve(),
     windowAtPoint: (x, y) => Promise.resolve(windowOf('w1', 'notes', { bounds: { x, y, width: 1, height: 1 } })),
     snapshot: request => Promise.resolve({
       windowId: request.windowId,
@@ -92,6 +101,7 @@ function makeProvider(id: string, available: boolean, extras: Partial<ComputerPr
     }),
     press: () => Promise.resolve(),
     setValue: () => Promise.resolve(),
+    focusElement: () => Promise.resolve(),
     action: () => Promise.resolve(),
     click: (request) => {
       clicks.push({ x: request.x, y: request.y })
@@ -361,14 +371,15 @@ describe('ComputerRuntime actions', () => {
     expect(provider.clicks).toEqual([{ x: 4, y: 5 }])
   })
 
-  it('allows a hit-test miss (undefined) after a grant', async () => {
+  it('rejects a hit-test miss (undefined) after a grant', async () => {
     const { computer } = await mount()
     computer.registerProvider(makeProvider('local', available, {
       windowAtPoint: () => Promise.resolve(undefined),
     }))
     const owner = makeAgent('a')
     computer.grant(owner, ComputerAppId('notes'), 'session')
-    await computer.click(owner, ComputerWindowId('w1'), { x: 1, y: 1 })
+    await expect(computer.click(owner, ComputerWindowId('w1'), { x: 1, y: 1 }))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_TARGET_MISMATCH' }))
   })
 
   it('throws COMPUTER_WINDOW_GONE for an unknown window', async () => {
@@ -516,6 +527,152 @@ describe('status', () => {
     computer.grant(owner, ComputerAppId('notes'), 'session')
     await computer.action(owner, ComputerWindowId('w1'), { handle: 'n1', action: 'activate' })
   })
+
+  it('lists displays, moves windows, focuses elements, and tracks held keys', async () => {
+    const { ctx, computer } = await mount()
+    const keys: { key: string; action?: string }[] = []
+    computer.registerProvider(makeProvider('local', available, {
+      key: (request) => {
+        keys.push({ key: request.key, ...request.action !== undefined ? { action: request.action } : {} })
+        return Promise.resolve()
+      },
+    }))
+    const owner = makeAgent('a')
+    const other = makeAgent('b')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    computer.grant(other, ComputerAppId('notes'), 'session')
+    await computer.releaseHeldKeys(owner)
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Escape', action: 'up' })
+    expect((await computer.listDisplays())[0]?.id).toBe('d1')
+    await computer.setWindowBounds(owner, ComputerWindowId('w1'), { x: 1, y: 2, width: 3, height: 4 })
+    await computer.focusElement(owner, ComputerWindowId('w1'), 'n1')
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' })
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'a', action: 'down' })
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'up' })
+    await expect(computer.click(other, ComputerWindowId('w1'), { x: 1, y: 1 }))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_INPUT_BUSY' }))
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'a', action: 'up' })
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'a', action: 'down' })
+    await ctx.serial('agent/turn-stopping', { agent: owner, turn: 1, signal: new AbortController().signal })
+    expect(keys.some(item => item.key === 'a' && item.action === 'up')).toBe(true)
+  })
+
+  it('rejects typing when the window cannot be focused', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      listWindows: () => Promise.resolve([windowOf('w1', 'notes', { focused: false })]),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await expect(computer.type(owner, ComputerWindowId('w1'), 'hi'))
+      .rejects.toThrow(expect.objectContaining({ code: 'COMPUTER_TARGET_MISMATCH' }))
+  })
+
+  it('types after focusing an unfocused window', async () => {
+    const { computer } = await mount()
+    let focused = false
+    computer.registerProvider(makeProvider('local', available, {
+      listWindows: () => Promise.resolve([windowOf('w1', 'notes', { focused })]),
+      focusWindow: () => {
+        focused = true
+        return Promise.resolve()
+      },
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.type(owner, ComputerWindowId('w1'), 'hi')
+  })
+
+  it('releases held keys when a later key call fails', async () => {
+    const { computer } = await mount()
+    let fail = false
+    computer.registerProvider(makeProvider('local', available, {
+      key: (_request) => {
+        if (fail) return Promise.reject(new Error('helper'))
+        return Promise.resolve()
+      },
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' })
+    fail = true
+    await expect(computer.key(owner, ComputerWindowId('w1'), { key: 'a' })).rejects.toThrow('helper')
+    fail = false
+    const other = makeAgent('b')
+    computer.grant(other, ComputerAppId('notes'), 'session')
+    await computer.click(other, ComputerWindowId('w1'), { x: 1, y: 1 })
+  })
+
+  it('swallows key-up failures while releasing held keys', async () => {
+    const { computer } = await mount()
+    computer.registerProvider(makeProvider('local', available, {
+      key: request => request.action === 'up'
+        ? Promise.reject(new Error('gone'))
+        : Promise.resolve(),
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' })
+    await computer.releaseHeldKeys(owner)
+  })
+
+  it('releases held keys once when cancellation and turn cleanup overlap', async () => {
+    const { computer } = await mount()
+    const keys: string[] = []
+    computer.registerProvider(makeProvider('local', available, {
+      key: async (request) => {
+        await Promise.resolve()
+        keys.push(`${request.key}:${request.action}`)
+      },
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    const controller = new AbortController()
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' }, controller.signal)
+    controller.abort()
+    await computer.releaseHeldKeys(owner)
+    expect(keys).toEqual(['Shift:down', 'Shift:up'])
+  })
+
+  it('waits for in-flight key-down before releasing it during disposal', async () => {
+    const { ctx, computer } = await mount()
+    const entered = Promise.withResolvers<undefined>()
+    const finish = Promise.withResolvers<undefined>()
+    const keys: string[] = []
+    computer.registerProvider(makeProvider('local', available, {
+      key: async (request) => {
+        if (request.action === 'down') {
+          entered.resolve(undefined)
+          await finish.promise
+        }
+        keys.push(`${request.key}:${request.action}`)
+      },
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    const down = computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' })
+    await entered.promise
+    const disposal = ctx.fiber.dispose()
+    finish.resolve(undefined)
+    await Promise.all([down, disposal])
+    expect(keys).toEqual(['Shift:down', 'Shift:up'])
+  })
+
+  it('releases held keys before fiber disposal settles', async () => {
+    const { ctx, computer } = await mount()
+    const keys: string[] = []
+    computer.registerProvider(makeProvider('local', available, {
+      key: async (request) => {
+        await Promise.resolve()
+        keys.push(`${request.key}:${request.action}`)
+      },
+    }))
+    const owner = makeAgent('a')
+    computer.grant(owner, ComputerAppId('notes'), 'session')
+    await computer.key(owner, ComputerWindowId('w1'), { key: 'Shift', action: 'down' })
+    await ctx.fiber.dispose()
+    expect(keys).toEqual(['Shift:down', 'Shift:up'])
+  })
 })
 
 describe('status helpers', () => {
@@ -531,6 +688,8 @@ describe('status helpers', () => {
     expect(recoveryForComputerCode('COMPUTER_PROVIDER_AMBIGUOUS')).toContain('Multiple')
     expect(recoveryForComputerCode('COMPUTER_UNSUPPORTED')).toContain('computer_status')
     expect(recoveryForComputerCode('COMPUTER_GEOMETRY_CHANGED')).toContain('computer_observe')
+    expect(recoveryForComputerCode('COMPUTER_TARGET_MISMATCH')).toContain('declared window')
+    expect(recoveryForComputerCode('COMPUTER_INPUT_BUSY')).toContain('holding keyboard')
     expect(recoveryForComputerCode('COMPUTER_UNKNOWN')).toContain('Inspect')
     const denied = {
       accessibility: 'denied' as const,

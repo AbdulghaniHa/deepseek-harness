@@ -10,6 +10,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { isDeniedApp, isHarnessPid } from './deny.ts'
 import type {
@@ -18,6 +19,8 @@ import type {
   ComputerAppId as ComputerAppIdBrand,
   ComputerCapability,
   ComputerClickRequest,
+  ComputerDisplay,
+  ComputerDisplayId as ComputerDisplayIdBrand,
   ComputerDragRequest,
   ComputerGrant,
   ComputerGrantScope,
@@ -26,6 +29,7 @@ import type {
   ComputerPermissions,
   ComputerPoint,
   ComputerProvider,
+  ComputerRect,
   ComputerScreenshot,
   ComputerScreenshotRequest,
   ComputerScrollRequest,
@@ -53,9 +57,11 @@ export type {
   ComputerCapability,
   ComputerClickRequest,
   ComputerConnectionState,
+  ComputerDisplay,
   ComputerDragRequest,
   ComputerGrant,
   ComputerGrantScope,
+  ComputerKeyAction,
   ComputerKeyRequest,
   ComputerLaunchRequest,
   ComputerOperation,
@@ -87,6 +93,9 @@ export type ComputerAppId = ComputerAppIdBrand
 
 /** Opaque window identity minted by a provider and fenced by the seam. */
 export type ComputerWindowId = ComputerWindowIdBrand
+
+/** Opaque display identity minted by a provider and fenced by helper lifetime. */
+export type ComputerDisplayId = ComputerDisplayIdBrand
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -132,6 +141,15 @@ export function ComputerWindowId(value: string): ComputerWindowId {
 }
 
 /**
+ * Brand one provider-issued display id.
+ * @param value - raw display id from the selected provider.
+ * @returns the same string with the computer-display brand.
+ */
+export function ComputerDisplayId(value: string): ComputerDisplayId {
+  return brandString<ComputerDisplayIdBrand>(value)
+}
+
+/**
  * The computer-use access service. Registered as `ctx.computer` (one instance per context).
  *
  * Selection semantics (resolved at execution time, never order-dependent):
@@ -156,6 +174,13 @@ export class ComputerRuntime extends Service {
 
   private providers = new Map<string, ComputerProvider>()
   private readonly grants = new WeakMap<Agent, Map<string, ComputerGrantScope>>()
+  private readonly heldKeys = new WeakMap<Agent, Set<string>>()
+  private readonly keyDispatches = new WeakMap<Agent, Promise<void>>()
+  private readonly releasingKeys = new WeakMap<Agent, Promise<void>>()
+  private readonly heldProviders = new WeakMap<Agent, ComputerProvider>()
+  private readonly heldAbortDisposers = new WeakMap<Agent, () => void>()
+  private readonly holdingOwners = new Set<Agent>()
+  private inputHeldBy: Agent | undefined
   private readonly providerId: string | undefined
   private readonly extraDenied: readonly string[]
 
@@ -163,7 +188,18 @@ export class ComputerRuntime extends Service {
     super(ctx, 'computer')
     this.providerId = config.provider ?? process.env.DSH_COMPUTER_PROVIDER
     this.extraDenied = config.deniedApps ?? []
-    ctx.effect(() => () =>{  this.providers.clear() }, 'computer teardown')
+    ctx.effect(() => async () => {
+      await Promise.all([...this.holdingOwners].map(owner => this.releaseHeldKeys(owner)))
+      this.providers.clear()
+    }, 'computer teardown')
+    ctx.on('agent/turn-stopping', async ({ agent }) => {
+      await this.releaseHeldKeys(agent)
+    })
+    ctx.on('agent/disposed', ({ agent }) => {
+      void this.releaseHeldKeys(agent).catch((error: unknown) => {
+        this.ctx.logger.warn('computer key cleanup failed', error)
+      })
+    })
   }
 
   /**
@@ -295,6 +331,15 @@ export class ComputerRuntime extends Service {
   }
 
   /**
+   * List displays through the selected provider.
+   * @param signal - optional cancellation forwarded to the provider.
+   * @returns the current display list.
+   */
+  async listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]> {
+    return this.resolveProvider().listDisplays(signal)
+  }
+
+  /**
    * Record a grant for `owner` on `appId`. Does not consume a `once` grant.
    * @param owner - exact Agent that received the grant.
    * @param appId - application the grant covers.
@@ -367,7 +412,27 @@ export class ComputerRuntime extends Service {
   async focusWindow(owner: Agent, windowId: ComputerWindowId, signal?: AbortSignal): Promise<void> {
     const window = await this.requireWindow(windowId, signal)
     this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
+    this.assertInputOwner(owner)
     await this.resolveProvider().focusWindow(windowId, signal)
+  }
+
+  /**
+   * Move and resize a granted window.
+   * @param owner - exact Agent that owns the grant.
+   * @param windowId - window to mutate.
+   * @param bounds - destination bounds in logical screen coordinates.
+   * @param signal - optional cancellation forwarded to the provider.
+   */
+  async setWindowBounds(
+    owner: Agent,
+    windowId: ComputerWindowId,
+    bounds: ComputerRect,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const window = await this.requireWindow(windowId, signal)
+    this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
+    this.assertInputOwner(owner)
+    await this.resolveProvider().setWindowBounds(windowId, bounds, signal)
   }
 
   /**
@@ -427,6 +492,20 @@ export class ComputerRuntime extends Service {
   }
 
   /**
+   * Focus an accessibility node in a granted window.
+   * @param owner - exact Agent that owns the grant.
+   * @param windowId - window that owns the node.
+   * @param handle - provider node handle.
+   * @param signal - optional cancellation forwarded to the provider.
+   */
+  async focusElement(owner: Agent, windowId: ComputerWindowId, handle: string, signal?: AbortSignal): Promise<void> {
+    const window = await this.requireWindow(windowId, signal)
+    this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
+    this.assertInputOwner(owner)
+    await this.resolveProvider().focusElement(handle, signal)
+  }
+
+  /**
    * Invoke a named accessibility action on a node in a granted window.
    * @param owner - exact Agent that owns the grant.
    * @param windowId - window that owns the node.
@@ -447,6 +526,7 @@ export class ComputerRuntime extends Service {
    * @param signal - optional cancellation forwarded to the provider.
    */
   async click(owner: Agent, windowId: ComputerWindowId, request: ComputerClickRequest, signal?: AbortSignal): Promise<void> {
+    this.assertInputOwner(owner)
     await this.assertCoordinateTarget(owner, windowId, request.x, request.y, signal)
     await this.resolveProvider().click(request, signal)
   }
@@ -461,6 +541,8 @@ export class ComputerRuntime extends Service {
   async type(owner: Agent, windowId: ComputerWindowId, text: string, signal?: AbortSignal): Promise<void> {
     const window = await this.requireWindow(windowId, signal)
     this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
+    this.assertInputOwner(owner)
+    await this.assertForeground(windowId, signal)
     await this.resolveProvider().type(text, signal)
   }
 
@@ -472,9 +554,85 @@ export class ComputerRuntime extends Service {
    * @param signal - optional cancellation forwarded to the provider.
    */
   async key(owner: Agent, windowId: ComputerWindowId, request: ComputerKeyRequest, signal?: AbortSignal): Promise<void> {
+    await this.releasingKeys.get(owner)
     const window = await this.requireWindow(windowId, signal)
     this.assertAppAllowed(owner, await this.requireApp(window.appId, signal), { consumeOnce: true })
-    await this.resolveProvider().key(request, signal)
+    this.assertInputOwner(owner)
+    await this.assertForeground(windowId, signal)
+    const action = request.action ?? 'press'
+    const provider = this.resolveProvider()
+    signal?.throwIfAborted()
+    if (action === 'down') {
+      this.holdKey(owner, request.key)
+      this.heldProviders.set(owner, provider)
+    }
+    try {
+      const dispatch = provider.key(request, signal)
+      this.keyDispatches.set(owner, dispatch)
+      try {
+        await dispatch
+      } finally {
+        this.keyDispatches.delete(owner)
+      }
+    } catch (error) {
+      await this.releaseHeldKeys(owner)
+      throw error
+    }
+    if (action === 'down' && signal !== undefined) {
+      this.heldAbortDisposers.get(owner)?.()
+      const onAbort = (): void => {
+        void this.releaseHeldKeys(owner).catch((error: unknown) => {
+          this.ctx.logger.warn('computer key cleanup failed', error)
+        })
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      this.heldAbortDisposers.set(owner, () => { signal.removeEventListener('abort', onAbort) })
+      if (signal.aborted) await this.releaseHeldKeys(owner)
+    }
+    if (action === 'up') this.releaseKey(owner, request.key)
+  }
+
+  /**
+   * Release every key this owner currently holds. Called on cancellation,
+   * disposal, turn completion, and helper failure.
+   * @param owner - exact Agent whose held keys to release.
+   * @param signal - optional cancellation forwarded to the provider.
+   */
+  async releaseHeldKeys(owner: Agent, signal?: AbortSignal): Promise<void> {
+    const pending = this.releasingKeys.get(owner)
+    if (pending !== undefined) {
+      await pending
+      return
+    }
+    const held = this.heldKeys.get(owner)
+    const provider = this.heldProviders.get(owner)
+    if (held === undefined || held.size === 0 || provider === undefined) return
+    this.heldAbortDisposers.get(owner)?.()
+    this.heldAbortDisposers.delete(owner)
+    const release = async (): Promise<void> => {
+      const dispatch = this.keyDispatches.get(owner)
+      if (dispatch !== undefined) await Promise.allSettled([dispatch])
+      for (const key of [...held].reverse()) {
+        try {
+          await provider.key({ key, action: 'up' }, signal)
+        } catch {
+          // A helper that already failed cannot complete the matching key-up.
+        }
+      }
+      this.heldAbortDisposers.get(owner)?.()
+      this.heldAbortDisposers.delete(owner)
+      held.clear()
+      this.holdingOwners.delete(owner)
+      this.heldProviders.delete(owner)
+      if (this.inputHeldBy === owner) this.inputHeldBy = undefined
+    }
+    const completion = release()
+    this.releasingKeys.set(owner, completion)
+    try {
+      await completion
+    } finally {
+      this.releasingKeys.delete(owner)
+    }
   }
 
   /**
@@ -485,6 +643,7 @@ export class ComputerRuntime extends Service {
    * @param signal - optional cancellation forwarded to the provider.
    */
   async scroll(owner: Agent, windowId: ComputerWindowId, request: ComputerScrollRequest, signal?: AbortSignal): Promise<void> {
+    this.assertInputOwner(owner)
     await this.assertCoordinateTarget(owner, windowId, request.x, request.y, signal)
     await this.resolveProvider().scroll(request, signal)
   }
@@ -497,6 +656,7 @@ export class ComputerRuntime extends Service {
    * @param signal - optional cancellation forwarded to the provider.
    */
   async drag(owner: Agent, windowId: ComputerWindowId, request: ComputerDragRequest, signal?: AbortSignal): Promise<void> {
+    this.assertInputOwner(owner)
     await this.assertCoordinateTarget(owner, windowId, request.fromX, request.fromY, signal)
     await this.assertCoordinateTarget(owner, windowId, request.toX, request.toY, signal)
     await this.resolveProvider().drag(request, signal)
@@ -510,6 +670,7 @@ export class ComputerRuntime extends Service {
    * @param signal - optional cancellation forwarded to the provider.
    */
   async move(owner: Agent, windowId: ComputerWindowId, request: ComputerPoint, signal?: AbortSignal): Promise<void> {
+    this.assertInputOwner(owner)
     await this.assertCoordinateTarget(owner, windowId, request.x, request.y, signal)
     await this.resolveProvider().move(request, signal)
   }
@@ -586,9 +747,50 @@ export class ComputerRuntime extends Service {
     const app = await this.requireApp(window.appId, signal)
     this.assertAppAllowed(owner, app, { consumeOnce: true })
     const hit = await this.resolveProvider().windowAtPoint(x, y, signal)
-    if (hit !== undefined && hit.appId !== window.appId) {
+    if (hit === undefined || (hit.id !== windowId && hit.appId !== window.appId)) {
       throw new ComputerError(
-        `coordinate (${x}, ${y}) hits "${hit.appId}" rather than the declared window's app "${window.appId}"`,
+        hit === undefined
+          ? `coordinate (${x}, ${y}) does not hit the declared window "${windowId}"`
+          : `coordinate (${x}, ${y}) hits "${hit.appId}" rather than the declared window's app "${window.appId}"`,
+        'COMPUTER_TARGET_MISMATCH',
+      )
+    }
+  }
+
+  private assertInputOwner(owner: Agent): void {
+    if (this.inputHeldBy !== undefined && this.inputHeldBy !== owner) {
+      throw new ComputerError('another agent is holding keyboard keys', 'COMPUTER_INPUT_BUSY')
+    }
+  }
+
+  private holdKey(owner: Agent, key: string): void {
+    const held = this.heldKeys.get(owner) ?? new Set<string>()
+    held.add(key)
+    this.heldKeys.set(owner, held)
+    this.holdingOwners.add(owner)
+    this.inputHeldBy = owner
+  }
+
+  private releaseKey(owner: Agent, key: string): void {
+    const held = this.heldKeys.get(owner)
+    held?.delete(key)
+    if (held === undefined || held.size === 0) {
+      this.holdingOwners.delete(owner)
+      this.heldAbortDisposers.get(owner)?.()
+      this.heldAbortDisposers.delete(owner)
+      this.heldProviders.delete(owner)
+      if (this.inputHeldBy === owner) this.inputHeldBy = undefined
+    }
+  }
+
+  private async assertForeground(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void> {
+    const current = await this.requireWindow(windowId, signal)
+    if (current.focused) return
+    await this.resolveProvider().focusWindow(windowId, signal)
+    const focused = await this.requireWindow(windowId, signal)
+    if (!focused.focused) {
+      throw new ComputerError(
+        `window "${windowId}" is not the foreground window; synthesized keyboard input was not sent`,
         'COMPUTER_TARGET_MISMATCH',
       )
     }

@@ -27,7 +27,7 @@ dsh browser install --browser chrome --extension-id <id-from-chrome-extensions>
   name: '@deepseek-ai/dsh-tool-browser'
   config:
     enabled: true
-    approval: user-tabs
+    approval: never
     allowRawCdp: false
 ```
 
@@ -41,7 +41,7 @@ dsh browser status --browser chrome
 
 ## 模型能做什么
 
-启用后，模型可以列出标签页、附加到已有标签页（需审批）、打开 URL、快照无障碍树、点击、输入、截图、执行 JavaScript，以及读取该标签页的 HTTP 请求和响应体。对于不需要登录会话的公开页面，优先使用 `web_fetch`。把每份快照和响应体当作不可信数据。
+启用后，模型可以列出标签页、附加到已有标签页、打开 URL、快照无障碍树、点击、输入、填充字段、截图、执行 JavaScript，以及读取该标签页的 HTTP 请求和响应体。对于不需要登录会话的公开页面，优先使用 `web_fetch`。把每份快照和响应体当作不可信数据。默认 `approval: never` 在附加前不问；设置 `approval: user-tabs` 以在附加到用户已登录会话前确认。
 
 Chrome 保持“正在调试此浏览器”横幅可见。智能体打开的标签页落在 DeepSeek 标签组中。
 

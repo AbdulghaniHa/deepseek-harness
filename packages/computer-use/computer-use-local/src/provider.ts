@@ -11,12 +11,14 @@ import {
   type ComputerAppId,
   type ComputerCapability,
   type ComputerClickRequest,
+  type ComputerDisplay,
   type ComputerDragRequest,
   type ComputerKeyRequest,
   type ComputerLaunchRequest,
   type ComputerPermissions,
   type ComputerPoint,
   type ComputerProvider,
+  type ComputerRect,
   type ComputerScreenshot,
   type ComputerScreenshotRequest,
   type ComputerScrollRequest,
@@ -70,6 +72,9 @@ function asScreenshot(value: unknown): ComputerScreenshot {
 export class LocalComputerProvider implements ComputerProvider {
   readonly id = LOCAL_COMPUTER_PROVIDER_ID
   private readonly client: ComputerHostClient
+  private readonly keyDispatches = new Set<Promise<unknown>>()
+  private readonly heldKeys = new Set<string>()
+  private disposal: Promise<void> | undefined
 
   constructor(ctx: Context, options: LocalComputerProviderOptions) {
     this.client = options.client ?? new ComputerHostClient({
@@ -112,12 +117,20 @@ export class LocalComputerProvider implements ComputerProvider {
     return await this.client.call('listWindows', appId === undefined ? undefined : { appId }, signal) as readonly ComputerWindow[]
   }
 
+  async listDisplays(signal?: AbortSignal): Promise<readonly ComputerDisplay[]> {
+    return await this.client.call('listDisplays', undefined, signal) as readonly ComputerDisplay[]
+  }
+
   async launchApp(request: ComputerLaunchRequest, signal?: AbortSignal): Promise<ComputerApp> {
     return await this.client.call('launchApp', request, signal) as ComputerApp
   }
 
   async focusWindow(windowId: ComputerWindowId, signal?: AbortSignal): Promise<void> {
     await this.client.call('focusWindow', { windowId }, signal)
+  }
+
+  async setWindowBounds(windowId: ComputerWindowId, bounds: ComputerRect, signal?: AbortSignal): Promise<void> {
+    await this.client.call('setWindowBounds', { windowId, ...bounds }, signal)
   }
 
   async windowAtPoint(x: number, y: number, signal?: AbortSignal): Promise<ComputerWindow | undefined> {
@@ -141,6 +154,10 @@ export class LocalComputerProvider implements ComputerProvider {
     await this.client.call('setValue', { handle, text }, signal)
   }
 
+  async focusElement(handle: string, signal?: AbortSignal): Promise<void> {
+    await this.client.call('focusElement', { handle }, signal)
+  }
+
   async action(request: ComputerActionRequest, signal?: AbortSignal): Promise<void> {
     await this.client.call('action', request, signal)
   }
@@ -154,7 +171,16 @@ export class LocalComputerProvider implements ComputerProvider {
   }
 
   async key(request: ComputerKeyRequest, signal?: AbortSignal): Promise<void> {
-    await this.client.call('key', request, signal)
+    if (this.disposal !== undefined) throw new ComputerError('computer provider is disposed', 'COMPUTER_HOST_CRASHED')
+    if (request.action === 'down') this.heldKeys.add(request.key)
+    const dispatch = this.client.call('key', request, signal)
+    this.keyDispatches.add(dispatch)
+    try {
+      await dispatch
+    } finally {
+      this.keyDispatches.delete(dispatch)
+    }
+    if (request.action === 'up') this.heldKeys.delete(request.key)
   }
 
   async scroll(request: ComputerScrollRequest, signal?: AbortSignal): Promise<void> {
@@ -178,10 +204,26 @@ export class LocalComputerProvider implements ComputerProvider {
   }
 
   /**
-   * Tear down the helper process.
+   * Release held keys before terminating the helper process.
    * @param signal - optional bound for the wait.
    */
   async dispose(signal?: AbortSignal): Promise<void> {
-    await this.client.dispose(signal)
+    const teardown = async (): Promise<void> => {
+      await Promise.allSettled(this.keyDispatches)
+      try {
+        for (const key of [...this.heldKeys].reverse()) {
+          try {
+            await this.client.call('key', { key, action: 'up' })
+          } catch {
+            // A failed helper cannot accept key-up; termination still must finish.
+          }
+        }
+      } finally {
+        this.heldKeys.clear()
+        await this.client.dispose(signal)
+      }
+    }
+    this.disposal ??= teardown()
+    await this.disposal
   }
 }

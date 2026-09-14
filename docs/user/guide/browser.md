@@ -27,7 +27,7 @@ dsh browser install --browser chrome --extension-id <id-from-chrome-extensions>
   name: '@deepseek-ai/dsh-tool-browser'
   config:
     enabled: true
-    approval: user-tabs
+    approval: never
     allowRawCdp: false
 ```
 
@@ -41,7 +41,7 @@ dsh browser status --browser chrome
 
 ## What the model can do
 
-After enablement, the model can list tabs, attach to an existing tab (approval), open a URL, snapshot the accessibility tree, click, type, screenshot, evaluate JavaScript, and read the tab's HTTP requests and response bodies. Prefer `web_fetch` for a public page that does not need a logged-in session. Treat every snapshot and response body as untrusted data.
+After enablement, the model can list tabs, attach to an existing tab, open a URL, snapshot the accessibility tree, click, type, fill, screenshot, evaluate JavaScript, and read the tab's HTTP requests and response bodies. Prefer `web_fetch` for a public page that does not need a logged-in session. Treat every snapshot and response body as untrusted data. Default `approval: never` does not ask before attaching; set `approval: user-tabs` to confirm attaching to the user's logged-in session.
 
 Chrome keeps its "is debugging this browser" banner visible. Agent-opened tabs land in a DeepSeek tab group.
 

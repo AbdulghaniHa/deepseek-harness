@@ -57,6 +57,8 @@ kind: "package-reference"
 
 `ComputerRuntime` 是 `ctx.computer` 上的 Cordis `Service`。选择语义与 `BrowserRuntime` 相同：配置的 id，否则恰好一个可用提供方。授权是以 `Agent` 对象身份为键的 `WeakMap`。拒绝检查和 `windowAtPoint` 命中测试在运行时执行，因此直接调用方无法跳过工具。
 
+按住的键会保留其提供方，直到对应 key-up 调用结束。轮次停止、agent 的 dispose、运行时 dispose、取消和按键分发失败都会在清除所有权之前尝试释放所有按住的键。
+
 | 文件 | 职责 |
 |---|---|
 | `src/index.ts` | 注册表、授权、拒绝、命中测试 |

@@ -18,11 +18,13 @@ export const BASE_COMPUTER_OPERATIONS: readonly ComputerOperation[] = [
   'listWindows',
   'launchApp',
   'focusWindow',
+  'listDisplays',
+  'setWindowBounds',
 ]
 
 /** Operations gated by a advertised capability. */
 export const COMPUTER_OPERATIONS_BY_CAPABILITY: Readonly<Record<ComputerCapability, readonly ComputerOperation[]>> = {
-  a11y: ['snapshot', 'action'],
+  a11y: ['snapshot', 'action', 'focusElement'],
   screenshot: ['screenshot'],
   input: ['click', 'type', 'key', 'scroll', 'drag', 'move'],
   clipboard: ['clipboardRead', 'clipboardWrite'],
@@ -88,6 +90,10 @@ export function recoveryForComputerCode(code: string, detail?: string): string {
       return 'This operation is not supported by the selected provider or platform. Use computer_status to list supported operations.'
     case 'COMPUTER_GEOMETRY_CHANGED':
       return 'Window geometry changed since the last observation. Call computer_observe (or computer_snapshot) again before using screenshot-space coordinates.'
+    case 'COMPUTER_TARGET_MISMATCH':
+      return 'The pointer or keyboard target is not the declared window. Focus the window and take a new observation before retrying.'
+    case 'COMPUTER_INPUT_BUSY':
+      return 'Another agent is holding keyboard keys. Wait for that turn to finish, or cancel it, before sending input.'
     default:
       return 'Inspect computer_status issues, then retry after addressing the reported code.'
   }

@@ -37,6 +37,7 @@ export async function approveBrowserAction(options: {
   if (options.agent === undefined) {
     throw new Error(`browser action "${options.toolName}" requires approval, but the call has no agent to route it through`)
   }
+  /* jscpd:ignore-start -- approval request and outcomes are the shared user-approval vocabulary. */
   const outcome = await options.approval.request({
     agent: options.agent,
     toolName: options.toolName,
@@ -54,4 +55,5 @@ export async function approveBrowserAction(options: {
       throw new Error(`unhandled approval outcome ${String(exhaustive)}`)
     }
   }
+  /* jscpd:ignore-end */
 }

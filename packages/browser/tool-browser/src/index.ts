@@ -9,13 +9,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-browser'
+import type {} from '@deepseek-ai/dsh-attachment'
 import type { BrowserApprovalMode } from './approval.ts'
-import { BROWSER_PROMPT } from './prompt.ts'
+import { browserPrompt } from './prompt.ts'
 import { registerBrowserTools } from './tools.ts'
 
 export { approveBrowserAction } from './approval.ts'
 export type { BrowserApprovalMode, BrowserApprover } from './approval.ts'
-export { cdpClient, clickAt, dragAt, nodeCenter, pageIdentity, typeText } from './cdp.ts'
+export { cdpClient, clickAt, dragAt, fillText, insertText, nodeCenter, pageIdentity, pressKey, scrollAt, selectAll, typeText, evaluateJson } from './cdp.ts'
 export type { CdpClient, CdpSession } from './cdp.ts'
 export { boundResponseBody, createNetworkCapture } from './network.ts'
 export type { NetworkBodyResult, NetworkCapture, NetworkCaptureOptions, NetworkRequestEntry } from './network.ts'
@@ -28,9 +29,17 @@ export {
   presentBrowserResult,
 } from './present.ts'
 export type { BrowserToolMeta } from './present.ts'
-export { BROWSER_PROMPT } from './prompt.ts'
-export { SNAPSHOT_REF, buildSnapshot, resolveRef } from './snapshot.ts'
+export { BROWSER_PROMPT, browserPrompt } from './prompt.ts'
+export { SNAPSHOT_REF, buildSnapshot, resolveRef, resolveRefFrom, viewSnapshot } from './snapshot.ts'
 export type { AxNode, BrowserSnapshot, SnapshotNode } from './snapshot.ts'
+export { waitForActionable } from './actionability.ts'
+export type { ActionKind, ReadyTarget } from './actionability.ts'
+export { createConsoleCapture } from './console.ts'
+export type { ConsoleCapture, ConsoleCaptureOptions, ConsoleMessage } from './console.ts'
+export { isOrdinaryLeftClick, modifierMask, shortcutModifier } from './input.ts'
+export { createKeyedSerialQueue, createSerialQueue } from './queue.ts'
+export { isImageCapableRoute } from './route.ts'
+export { boundChars, boundUtf8, textContinuationId } from './text.ts'
 export { flattenFrameTree, assertSameFrame } from './frames.ts'
 export type { FrameTreeNode } from './frames.ts'
 export { registerBrowserTools } from './tools.ts'
@@ -51,6 +60,15 @@ export const DEFAULT_SNAPSHOT_MAX_NODES = 200
 /** Default cap on an inlined screenshot's decoded size. */
 export const DEFAULT_SCREENSHOT_MAX_BYTES = 1_000_000
 
+/** Default cap on Unicode characters in one snapshot field. */
+export const DEFAULT_SNAPSHOT_MAX_FIELD_CHARS = 2_000
+
+/** Default cap on UTF-8 bytes of one textual result. */
+export const DEFAULT_TEXT_MAX_BYTES = 100_000
+
+/** Default cap on buffered console entries per tab. */
+export const DEFAULT_CONSOLE_MAX_ENTRIES = 200
+
 /** Default cooperative timeout for `browser_evaluate`. */
 export const DEFAULT_EVALUATE_TIMEOUT_MS = 15_000
 
@@ -70,6 +88,12 @@ export interface Config {
   snapshotMaxNodes?: number
   /** Upper bound on an inlined screenshot's decoded byte size. */
   screenshotMaxBytes?: number
+  /** Upper bound on Unicode characters in one snapshot name or value. */
+  snapshotMaxFieldChars?: number
+  /** Upper bound on UTF-8 bytes of page text, evaluate results, and console lines. */
+  textMaxBytes?: number
+  /** Upper bound on console entries retained per tab. */
+  consoleMaxEntries?: number
   /** Cooperative timeout budget (ms) for `browser_evaluate`. */
   evaluateTimeoutMs?: number
   /** Register the raw `browser_cdp` escape hatch. Defaults to false. */
@@ -84,9 +108,12 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
-  approval: z.union(['always', 'user-tabs', 'never'] as const).default('user-tabs'),
+  approval: z.union(['always', 'user-tabs', 'never'] as const).default('never'),
   snapshotMaxNodes: z.number().default(DEFAULT_SNAPSHOT_MAX_NODES),
   screenshotMaxBytes: z.number().default(DEFAULT_SCREENSHOT_MAX_BYTES),
+  snapshotMaxFieldChars: z.number().default(DEFAULT_SNAPSHOT_MAX_FIELD_CHARS),
+  textMaxBytes: z.number().default(DEFAULT_TEXT_MAX_BYTES),
+  consoleMaxEntries: z.number().default(DEFAULT_CONSOLE_MAX_ENTRIES),
   evaluateTimeoutMs: z.number().default(DEFAULT_EVALUATE_TIMEOUT_MS),
   allowRawCdp: z.boolean().default(false),
   networkMaxRequests: z.number().default(DEFAULT_NETWORK_MAX_REQUESTS),
@@ -113,6 +140,9 @@ export function apply(ctx: Context, config: Config): void {
   const resolved = config as ResolvedConfig
   assertPositiveInteger('snapshotMaxNodes', resolved.snapshotMaxNodes)
   assertPositiveInteger('screenshotMaxBytes', resolved.screenshotMaxBytes)
+  assertPositiveInteger('snapshotMaxFieldChars', resolved.snapshotMaxFieldChars)
+  assertPositiveInteger('textMaxBytes', resolved.textMaxBytes)
+  assertPositiveInteger('consoleMaxEntries', resolved.consoleMaxEntries)
   assertPositiveInteger('evaluateTimeoutMs', resolved.evaluateTimeoutMs)
   assertPositiveInteger('networkMaxRequests', resolved.networkMaxRequests)
   assertPositiveInteger('networkMaxBodyBytes', resolved.networkMaxBodyBytes)
@@ -121,7 +151,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.systemPrompt.section({
     name: 'tool:browser',
     order: ctx.systemPrompt.getSectionOrder('TOOL_BROWSER'),
-    text: BROWSER_PROMPT,
+    text: browserPrompt(resolved.approval),
   })
   registerBrowserTools(ctx, resolved)
 }
